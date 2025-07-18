@@ -1,0 +1,1755 @@
+import 'dart:ui' as ui;
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'diary_edit_page.dart';
+
+// ========== 主页面结构 ==========
+
+// 顶层倒计时计算函数，供首页和轨迹页共用
+Map<String, int> getCountdown(DateTime birthday, int targetAge) {
+  final now = DateTime.now();
+  final target = DateTime(birthday.year + targetAge, birthday.month, birthday.day);
+  int years = target.year - now.year;
+  int months = target.month - now.month;
+  int days = target.day - now.day;
+  if (days < 0) {
+    months -= 1;
+    days += DateTime(now.year, now.month + 1, 0).day;
+  }
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+  return {'years': years, 'months': months, 'days': days};
+}
+
+class MainPage extends StatefulWidget {
+  const MainPage({super.key});
+  @override
+  State<MainPage> createState() => _MainPageState();
+}
+
+class _MainPageState extends State<MainPage> {
+  int _currentIndex = 0;
+  late DateTime birthday;
+  late int targetAge;
+  bool _hasTriggeredInit = false; // 标记是否已初始化触发
+  void updateCountdown(DateTime newBirthday, int newTargetAge) {
+    setState(() {
+      birthday = newBirthday;
+      targetAge = newTargetAge;
+    });
+  }
+  @override
+  void initState() {
+    super.initState();
+    birthday = DateTime(1997, 7, 12);
+    targetAge = 80;
+    // 只在App启动时触发一次
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      updateCountdown(birthday, targetAge);
+    });
+  }
+  @override
+  Widget build(BuildContext context) {
+    // 首次进入App时只触发一次onCountdownChanged
+    if (!_hasTriggeredInit) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        updateCountdown(birthday, targetAge);
+      });
+      _hasTriggeredInit = true;
+    }
+    return Scaffold(
+      backgroundColor: Color(0xFFDBD8D3),
+      body: Stack(
+        children: [
+          // 内容区（不留底部padding）
+          AnimatedSwitcher(
+            duration: Duration(milliseconds: 400),
+            transitionBuilder: (child, animation) {
+              return FadeTransition(opacity: animation, child: child);
+            },
+            child: _currentIndex == 0
+                ? TodayPageContent(
+                    key: ValueKey(0),
+                    birthday: birthday,
+                    targetAge: targetAge,
+                    onCountdownChanged: updateCountdown,
+                  )
+                : TrailPageContent(
+                    key: ValueKey(1),
+                    birthday: birthday,
+                    targetAge: targetAge,
+                  ),
+          ),
+          // 悬浮新建按钮（始终悬浮在底部导航栏上方）
+          if (_currentIndex == 1)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 64 + 24, // 底部导航栏高度+间距
+              child: Center(
+                child: GestureDetector(
+                  onTap: () {
+                    // TODO: 新建日记弹窗或跳转
+                  },
+                  child: Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      color: Color(0xFFF76E00),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Color(0x33F76E00),
+                          blurRadius: 8,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Center(
+                      child: Icon(Icons.add, color: Colors.black, size: 36),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          // 底部导航栏（始终固定在底部）
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: BottomNavBar(
+              currentIndex: _currentIndex,
+              onTap: (idx) => setState(() => _currentIndex = idx),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// 首页内容部分（去掉Scaffold和bar，只保留Stack内容）
+class TodayPageContent extends StatefulWidget {
+  final DateTime birthday;
+  final int targetAge;
+  final void Function(DateTime, int) onCountdownChanged;
+  const TodayPageContent({
+    Key? key,
+    required this.birthday,
+    required this.targetAge,
+    required this.onCountdownChanged,
+  }) : super(key: key);
+  @override
+  State<TodayPageContent> createState() => _TodayPageContentState();
+}
+
+class _TodayPageContentState extends State<TodayPageContent> with TickerProviderStateMixin {
+  late DateTime birthday;
+  late int targetAge;
+  late Timer _timer;
+  late Map<String, int> countdown;
+  late AnimationController _animController;
+  late Animation<double> _yearAnim;
+  late Animation<double> _monthAnim;
+  late Animation<double> _dayAnim;
+  late Animation<double> _targetAgeAnim;
+  late List<AnimationController> _ballEntranceControllers;
+  late List<Animation<double>> _ballEntranceAnims;
+  late List<AnimationController> _ballBounceControllers;
+  late List<Animation<double>> _ballBounceAnims;
+  late AnimationController _pressController;
+  late Animation<double> _pressAnim;
+  late AnimationController _barPressController;
+  late Animation<double> _barHeightAnim;
+  int selectedYear = 2025;
+
+  @override
+  void initState() {
+    super.initState();
+    birthday = widget.birthday;
+    targetAge = widget.targetAge;
+    countdown = getCountdown(birthday, targetAge);
+    _timer = Timer.periodic(Duration(seconds: 1), (_) {
+      setState(() {
+        countdown = getCountdown(birthday, targetAge);
+      });
+    });
+    _animController = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 1800),
+    );
+    _yearAnim = Tween<double>(begin: -10, end: countdown['years']!.toDouble()).animate(
+      CurvedAnimation(parent: _animController, curve: Curves.elasticOut),
+    );
+    _monthAnim = Tween<double>(begin: -10, end: countdown['months']!.toDouble()).animate(
+      CurvedAnimation(parent: _animController, curve: Curves.elasticOut),
+    );
+    _dayAnim = Tween<double>(begin: -10, end: countdown['days']!.toDouble()).animate(
+      CurvedAnimation(parent: _animController, curve: Curves.elasticOut),
+    );
+    _targetAgeAnim = Tween<double>(begin: 0, end: targetAge.toDouble()).animate(
+      CurvedAnimation(parent: _animController, curve: Curves.easeOutBack),
+    );
+    _animController.forward();
+    _ballEntranceControllers = List.generate(3, (i) => AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 800),
+    ));
+    _ballEntranceAnims = List.generate(3, (i) => Tween<double>(begin: -40, end: 0).animate(
+      CurvedAnimation(parent: _ballEntranceControllers[i], curve: Curves.elasticOut),
+    ));
+    _ballBounceControllers = List.generate(3, (i) => AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 400),
+    ));
+    _ballBounceAnims = List.generate(3, (i) => Tween<double>(begin: 0, end: -32.0).animate(
+      CurvedAnimation(parent: _ballBounceControllers[i], curve: Curves.easeOutBack),
+    ));
+    Future(() async {
+      for (int i = 0; i < 3; i++) {
+        await Future.delayed(Duration(milliseconds: 120 * i));
+        _ballEntranceControllers[i].forward();
+      }
+    });
+    _pressController = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 180),
+      lowerBound: -32,
+      upperBound: 16,
+      value: 0,
+    );
+    _pressAnim = _pressController.drive(Tween<double>(begin: 0, end: 0));
+    _barPressController = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 180),
+      reverseDuration: Duration(milliseconds: 320),
+    );
+    _barHeightAnim = Tween<double>(begin: 1.0, end: 0.7).animate(
+      CurvedAnimation(
+        parent: _barPressController,
+        curve: Curves.easeOutBack,
+        reverseCurve: Curves.elasticOut,
+      ),
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant TodayPageContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.birthday != widget.birthday || oldWidget.targetAge != widget.targetAge) {
+      setState(() {
+        birthday = widget.birthday;
+        targetAge = widget.targetAge;
+        countdown = getCountdown(birthday, targetAge);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    for (final c in _ballEntranceControllers) { c.dispose(); }
+    for (final c in _ballBounceControllers) { c.dispose(); }
+    _animController.dispose();
+    _pressController.dispose();
+    _barPressController.dispose();
+    super.dispose();
+  }
+
+  double getMaxNumberWidth() {
+    final style = TextStyle(
+      color: Colors.black,
+      fontSize: 86.3064,
+      fontFamily: 'Alibaba-PuHuiTi-Heavy',
+      fontWeight: FontWeight.w400,
+    );
+    double maxWidth = 0;
+    for (var n in [countdown['months'], countdown['days']]) {
+      final tp = TextPainter(
+        text: TextSpan(text: n.toString(), style: style),
+        textDirection: ui.TextDirection.ltr,
+      )..layout();
+      if (tp.width > maxWidth) maxWidth = tp.width;
+    }
+    final yearWidth = 124.232;
+    if (yearWidth > maxWidth) maxWidth = yearWidth;
+    return maxWidth;
+  }
+
+  void _showCountdownConfigDialog() async {
+    DateTime tempBirthday = birthday;
+    int tempTargetAge = targetAge;
+    final TextEditingController ageController = TextEditingController(text: tempTargetAge.toString());
+    await showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: '设置倒计时目标',
+      barrierColor: Colors.black.withOpacity(0.2),
+      transitionDuration: Duration(milliseconds: 320),
+      pageBuilder: (context, anim1, anim2) {
+        return const SizedBox.shrink();
+      },
+      transitionBuilder: (context, anim1, anim2, child) {
+        final blur = Tween<double>(begin: 0, end: 16).animate(CurvedAnimation(parent: anim1, curve: Curves.easeOutCubic));
+        final opacity = Tween<double>(begin: 0, end: 1).animate(CurvedAnimation(parent: anim1, curve: Curves.easeOutCubic));
+        final scale = Tween<double>(begin: 0.92, end: 1).animate(CurvedAnimation(parent: anim1, curve: Curves.easeOutBack));
+        return AnimatedBuilder(
+          animation: anim1,
+          builder: (context, _) {
+            return Stack(
+              children: [
+                Opacity(
+                  opacity: opacity.value,
+                  child: BackdropFilter(
+                    filter: ui.ImageFilter.blur(sigmaX: blur.value, sigmaY: blur.value),
+                    child: Container(color: Colors.black.withOpacity(0)),
+                  ),
+                ),
+                Center(
+                  child: Transform.scale(
+                    scale: scale.value,
+                    child: Opacity(
+                      opacity: opacity.value,
+                      child: StatefulBuilder(
+                        builder: (context, setStateDialog) {
+                          return Material(
+                            color: Colors.transparent,
+                            child: Container(
+                              width: 320,
+                              height: 400,
+                              decoration: BoxDecoration(
+                                color: Color(0xFFDBD8D3),
+                                borderRadius: BorderRadius.circular(24),
+                              ),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  SizedBox(height: 12),
+                                  // 顶部提示框
+                                  Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      Container(
+                                        width: 240,
+                                        height: 50,
+                                        decoration: BoxDecoration(
+                                          color: Color(0xFF231815),
+                                          borderRadius: BorderRadius.circular(25),
+                                        ),
+                                      ),
+                                      Positioned(
+                                        bottom: -12,
+                                        child: Container(
+                                          width: 40,
+                                          height: 24,
+                                          decoration: BoxDecoration(
+                                            color: Color(0xFF231815),
+                                            borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
+                                          ),
+                                        ),
+                                      ),
+                                      Text(
+                                        '设置倒计时目标',
+                                        style: TextStyle(
+                                          fontFamily: 'Alibaba-PuHuiTi-Heavy',
+                                          fontSize: 20.8,
+                                          color: Color(0xFFC0BBB7),
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  // 内容区 mainAxisSize:min，间距适中
+                                  Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      SizedBox(height: 8),
+                                      Text(
+                                        '出生日期',
+                                        style: TextStyle(
+                                          fontFamily: 'Alibaba-PuHuiTi-Light',
+                                          fontSize: 29.86,
+                                          color: Color(0xFF231815),
+                                          fontWeight: FontWeight.w300,
+                                        ),
+                                      ),
+                                      SizedBox(height: 8),
+                                      Transform.translate(
+                                        offset: Offset(0, -8),
+                                        child: GestureDetector(
+                                          onTap: () async {
+                                            final DateTime? picked = await showCustomDatePicker(
+                                              context: context,
+                                              initialDate: tempBirthday,
+                                              firstDate: DateTime(1900),
+                                              lastDate: DateTime.now(),
+                                            );
+                                            if (picked != null) {
+                                              setStateDialog(() {
+                                                tempBirthday = picked;
+                                              });
+                                            }
+                                          },
+                                          child: Text(
+                                            DateFormat('yyyy-MM-dd').format(tempBirthday),
+                                            style: TextStyle(
+                                              fontFamily: 'Alibaba-PuHuiTi-Heavy',
+                                              fontSize: 41.46,
+                                              color: Color(0xFF231815),
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      SizedBox(height: 18),
+                                      Text(
+                                        '目标年龄',
+                                        style: TextStyle(
+                                          fontFamily: 'Alibaba-PuHuiTi-Light',
+                                          fontSize: 29.86,
+                                          color: Color(0xFF231815),
+                                          fontWeight: FontWeight.w300,
+                                        ),
+                                      ),
+                                      SizedBox(height: 8),
+                                      Transform.translate(
+                                        offset: Offset(0, -8),
+                                        child: SizedBox(
+                                          width: 80,
+                                          child: TextFormField(
+                                            controller: ageController,
+                                            autofocus: true,
+                                            textAlign: TextAlign.center,
+                                            keyboardType: TextInputType.number,
+                                            style: TextStyle(
+                                              fontFamily: 'Alibaba-PuHuiTi-Heavy',
+                                              fontSize: 41.46,
+                                              color: Color(0xFF231815),
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                            decoration: InputDecoration(
+                                              border: InputBorder.none,
+                                              isDense: true,
+                                              contentPadding: EdgeInsets.zero,
+                                            ),
+                                            onChanged: (val) {
+                                              int? v = int.tryParse(val);
+                                              if (v != null && v > 0) {
+                                                setStateDialog(() {
+                                                  tempTargetAge = v;
+                                                });
+                                              }
+                                            },
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  // 按钮区
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        GestureDetector(
+                                          onTap: () {
+                                            Navigator.of(context).pop();
+                                          },
+                                          child: Container(
+                                            width: 73.09,
+                                            height: 32,
+                                            decoration: BoxDecoration(
+                                              color: Color(0xFF865FC1),
+                                              borderRadius: BorderRadius.circular(12),
+                                            ),
+                                            alignment: Alignment.center,
+                                            child: Text(
+                                              '取消',
+                                              style: TextStyle(
+                                                fontFamily: 'Alibaba-PuHuiTi-Light',
+                                                fontSize: 24,
+                                                color: Color(0xFFDBD8D3),
+                                                fontWeight: FontWeight.w300,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        GestureDetector(
+                                          onTap: () {
+                                            widget.onCountdownChanged(tempBirthday, tempTargetAge);
+                                            setState(() {
+                                              birthday = tempBirthday;
+                                              targetAge = tempTargetAge;
+                                              countdown = getCountdown(birthday, targetAge);
+                                              // 同步更新动画 end 值并 forward
+                                              _yearAnim = Tween<double>(begin: _yearAnim.value, end: countdown['years']!.toDouble()).animate(
+                                                CurvedAnimation(parent: _animController, curve: Curves.elasticOut),
+                                              );
+                                              _monthAnim = Tween<double>(begin: _monthAnim.value, end: countdown['months']!.toDouble()).animate(
+                                                CurvedAnimation(parent: _animController, curve: Curves.elasticOut),
+                                              );
+                                              _dayAnim = Tween<double>(begin: _dayAnim.value, end: countdown['days']!.toDouble()).animate(
+                                                CurvedAnimation(parent: _animController, curve: Curves.elasticOut),
+                                              );
+                                              _targetAgeAnim = Tween<double>(begin: _targetAgeAnim.value, end: targetAge.toDouble()).animate(
+                                                CurvedAnimation(parent: _animController, curve: Curves.easeOutBack),
+                                              );
+                                              _animController.forward(from: 0);
+                                            });
+                                            Navigator.of(context).pop();
+                                          },
+                                          child: Container(
+                                            width: 73.09,
+                                            height: 32,
+                                            decoration: BoxDecoration(
+                                              color: Color(0xFF865FC1),
+                                              borderRadius: BorderRadius.circular(12),
+                                            ),
+                                            alignment: Alignment.center,
+                                            child: Text(
+                                              '确定',
+                                              style: TextStyle(
+                                                fontFamily: 'Alibaba-PuHuiTi-Light',
+                                                fontSize: 24,
+                                                color: Color(0xFFDBD8D3),
+                                                fontWeight: FontWeight.w300,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ); // Material
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ); // Stack
+          },
+        ); // AnimatedBuilder
+      },
+    ); // showGeneralDialog
+  }
+
+  DateTime? _parseFlexibleDate(String input) {
+    final patterns = [
+      RegExp(r'^(\d{4})[./\- ]?(\d{2})[./\- ]?(\d{2})$'),
+      RegExp(r'^(\d{4})[./\- ](\d{2})[./\- ](\d{2})$'),
+    ];
+    for (final p in patterns) {
+      final m = p.firstMatch(input);
+      if (m != null) {
+        try {
+          final y = int.parse(m.group(1)!);
+          final mo = int.parse(m.group(2)!);
+          final d = int.parse(m.group(3)!);
+          return DateTime(y, mo, d);
+        } catch (_) {}
+      }
+    }
+    return null;
+  }
+
+  // 显示年份选择器
+  void _showYearPicker() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('选择年份'),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 300,
+            child: YearPicker(
+              firstDate: DateTime(2020),
+              lastDate: DateTime(2030),
+              selectedDate: DateTime(selectedYear),
+              onChanged: (DateTime value) {
+                setState(() {
+                  selectedYear = value.year;
+                });
+                Navigator.of(context).pop();
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: const Text('取消'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _onNavTap(int idx) {
+    if (idx == 1) {
+      Navigator.of(
+        context,
+      ).pushReplacement(MaterialPageRoute(builder: (_) => TrailPageContent(
+        birthday: birthday,
+        targetAge: targetAge,
+      )));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 进度条和圆形尺寸参数
+    final double barWidth = 28.0;
+    final double circleDiameter = barWidth * 1.3;
+    final double barSpacing = 56.0;
+    final double screenWidth = MediaQuery.of(context).size.width;
+    final double rightPadding = 32.0;
+    final double totalBarWidth = barWidth * 3 + barSpacing * 2;
+    final double leftBase = screenWidth * 0.58;
+    final double barHeight = 180.0;
+    final double barTop = 120.0;
+    final double topOffset = barTop + 20.0;
+    final double ballBarGap = 24.0;
+    final now = DateTime.now();
+    // 年进度（剩余/总数）
+    double yearPercent = countdown['years']! / targetAge;
+    if (yearPercent < 0) yearPercent = 0;
+    if (yearPercent > 1) yearPercent = 1;
+    // 月进度（剩余/12）
+    double monthPercent = countdown['months']! / 12.0;
+    if (monthPercent < 0) monthPercent = 0;
+    if (monthPercent > 1) monthPercent = 1;
+    // 日进度（剩余/30）
+    double dayPercent = countdown['days']! / 30.0;
+    if (dayPercent < 0) dayPercent = 0;
+    if (dayPercent > 1) dayPercent = 1;
+
+    return Stack(
+      children: [
+        // 小球入场动画
+        Positioned(
+          left: leftBase + barWidth / 2 - circleDiameter / 2, // 年小球
+          top: topOffset,
+          child: Container(
+            width: circleDiameter,
+            height: circleDiameter,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: Color(0xFFE0DFDC), width: 1.2), // 更淡的灰色
+            ),
+            child: ClipRect(
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                heightFactor: yearPercent,
+                child: Container(
+                  width: circleDiameter,
+                  height: circleDiameter,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      begin: Alignment.bottomCenter,
+                      end: Alignment.topCenter,
+                      colors: [Color(0xFFF76E00), Color(0x00FFFFFF)],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          left:
+              leftBase +
+              barSpacing +
+              barWidth / 2 -
+              circleDiameter / 2, // 月小球
+          top: topOffset,
+          child: Container(
+            width: circleDiameter,
+            height: circleDiameter,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: Color(0xFFE0DFDC), width: 1.2),
+            ),
+            child: ClipRect(
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                heightFactor: monthPercent,
+                child: Container(
+                  width: circleDiameter,
+                  height: circleDiameter,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      begin: Alignment.bottomCenter,
+                      end: Alignment.topCenter,
+                      colors: [Color(0xFF875EC2), Color(0x00FFFFFF)],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          left:
+              leftBase +
+              barSpacing * 2 +
+              barWidth / 2 -
+              circleDiameter / 2, // 日小球
+          top: topOffset,
+          child: Container(
+            width: circleDiameter,
+            height: circleDiameter,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: Color(0xFFE0DFDC), width: 1.2),
+            ),
+            child: ClipRect(
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                heightFactor: dayPercent,
+                child: Container(
+                  width: circleDiameter,
+                  height: circleDiameter,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      begin: Alignment.bottomCenter,
+                      end: Alignment.topCenter,
+                      colors: [Color(0xFFFFBF00), Color(0x00FFFFFF)],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        // 年进度条bar（橙色渐变）
+        Positioned(
+          left: leftBase,
+          top: topOffset + circleDiameter + ballBarGap - 40 + (1 - yearPercent) * barHeight, // 进度条底部对齐
+          child: Container(
+            width: barWidth,
+            height: barHeight * yearPercent,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: [Color(0xFFF76E00), Color(0x00DBD8D3)],
+              ),
+            ),
+          ),
+        ),
+        // 月进度条bar（紫色渐变）
+        Positioned(
+          left: leftBase + barSpacing,
+          top: topOffset + circleDiameter + ballBarGap - 40 + (1 - monthPercent) * barHeight,
+          child: Container(
+            width: barWidth,
+            height: barHeight * monthPercent,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: [Color(0xFF875EC2), Color(0x00DBD8D3)],
+              ),
+            ),
+          ),
+        ),
+        // 日进度条bar（黄色渐变）
+        Positioned(
+          left: leftBase + barSpacing * 2,
+          top: topOffset + circleDiameter + ballBarGap - 40 + (1 - dayPercent) * barHeight,
+          child: Container(
+            width: barWidth,
+            height: barHeight * dayPercent,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: [Color(0xFFFFBF00), Color(0x00DBD8D3)],
+              ),
+            ),
+          ),
+        ),
+        // 整体再上移60像素（原-40，现-80）
+        Transform.translate(
+          offset: Offset(0, -80),
+          child: Transform.scale(
+            scale: 1.18, // 保持放大
+            alignment: Alignment.topLeft,
+            child: GestureDetector(
+              onTap: _showCountdownConfigDialog,
+              child: Stack(
+                children: [
+                  // 年数字
+                  Positioned(
+                    left: 14,
+                    top: barTop,
+                    child: Transform.translate(
+                      offset: Offset(0, -2),
+                      child: SizedBox(
+                        width: 124.232,
+                        height: 105,
+                        child: Align(
+                          alignment: Alignment.topLeft,
+                          child: AnimatedBuilder(
+                            animation: _yearAnim,
+                            builder: (context, child) {
+                              return Text(
+                                _yearAnim.value.toInt().toString().padLeft(2, '0'),
+                                style: TextStyle(
+                                  color: Colors.black,
+                                  fontSize: 86.3064,
+                                  fontFamily: 'Alibaba-PuHuiTi-Heavy',
+                                  fontWeight: FontWeight.w400,
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // 月数字
+                  Positioned(
+                    left: 14,
+                    top: barTop + 95 - 22,
+                    child: Transform.translate(
+                      offset: Offset(0, -2),
+                      child: SizedBox(
+                        width: 114.8,
+                        height: 105,
+                        child: Align(
+                          alignment: Alignment.topLeft,
+                          child: AnimatedBuilder(
+                            animation: _monthAnim,
+                            builder: (context, child) {
+                              return Text(
+                                _monthAnim.value.toInt().toString().padLeft(
+                                  2,
+                                  '0',
+                                ),
+                                style: TextStyle(
+                                  color: Colors.black,
+                                  fontSize: 86.3064,
+                                  fontFamily: 'Alibaba-PuHuiTi-Heavy',
+                                  fontWeight: FontWeight.w400,
+                                ),
+                                textAlign: TextAlign.left,
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // 日数字
+                  Positioned(
+                    left: 14,
+                    top: barTop + (95 - 22) * 2,
+                    child: Transform.translate(
+                      offset: Offset(0, -2),
+                      child: SizedBox(
+                        width: 130.52,
+                        height: 105,
+                        child: Align(
+                          alignment: Alignment.topLeft,
+                          child: AnimatedBuilder(
+                            animation: _dayAnim,
+                            builder: (context, child) {
+                              return Text(
+                                _dayAnim.value.toInt().toString().padLeft(
+                                  2,
+                                  '0',
+                                ),
+                                style: TextStyle(
+                                  color: Colors.black,
+                                  fontSize: 86.3064,
+                                  fontFamily: 'Alibaba-PuHuiTi-Heavy',
+                                  fontWeight: FontWeight.w400,
+                                ),
+                                textAlign: TextAlign.left,
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // 英文板块整体右移最大数字宽度+左边距+8，下移64px
+                  Positioned(
+                    left: getMaxNumberWidth() + 14 + 8,
+                    top: barTop + 4 + 60,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(height: 10), // 年下移10px
+                        Text(
+                          countdown['years'] == 1 ? 'Year' : 'Years',
+                          style: TextStyle(
+                            color: Colors.black,
+                            fontSize: 9,
+                            fontFamily: 'Alibaba-PuHuiTi-Light',
+                            fontWeight: FontWeight.w100,
+                          ),
+                        ),
+                        SizedBox(height: 63), // 年和月之间
+                        Text(
+                          countdown['months'] == 1 ? 'Month' : 'Months',
+                          style: TextStyle(
+                            color: Colors.black,
+                            fontSize: 9,
+                            fontFamily: 'Alibaba-PuHuiTi-Light',
+                            fontWeight: FontWeight.w100,
+                          ),
+                        ),
+                        SizedBox(height: 73), // 月和日之间，回到原始高度
+                        Transform.translate(
+                          offset: Offset(0, -15), // Days上移15px
+                          child: Text(
+                            countdown['days'] == 1 ? 'Day' : 'Days',
+                            style: TextStyle(
+                              color: Colors.black,
+                              fontSize: 9,
+                              fontFamily: 'Alibaba-PuHuiTi-Light',
+                              fontWeight: FontWeight.w100,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        // BEFORE I TURN XX 提醒文字
+        Positioned(
+          left: 19,
+          top: 343, // 上移30px
+          child: SizedBox(
+            width: 380, // 增大宽度
+            height: 61,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: AnimatedBuilder(
+                animation: _targetAgeAnim,
+                builder: (context, child) {
+                  return FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'BEFORE I TURN ' +
+                          _targetAgeAnim.value.toInt().toString(),
+                      maxLines: 1,
+                      overflow: TextOverflow.visible,
+                      softWrap: false,
+                      style: TextStyle(
+                        color: Colors.black,
+                        fontSize: 36.8,
+                        fontFamily: 'Alibaba-PuHuiTi-Heavy',
+                        fontWeight: FontWeight.w400,
+                        height: 1.0,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+        // 今日日期显示
+        Positioned(
+          left: 19,
+          top: 391, // 上移30px
+          child: SizedBox(
+            width: 360,
+            height: 32,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Builder(
+                builder: (context) {
+                  final now = DateTime.now();
+                  final dateFormat = DateFormat('yyyy年MM月dd日');
+                  final weekDays = ['日', '一', '二', '三', '四', '五', '六'];
+                  final weekStr = '星期' + weekDays[now.weekday % 7];
+                  return Text(
+                    dateFormat.format(now) + ' ' + weekStr,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    softWrap: false,
+                    style: TextStyle(
+                      color: Color(0xFF5B5756),
+                      fontSize: 20, // 稍微放大
+                      fontFamily: 'Alibaba-PuHuiTi-Medium',
+                      fontWeight: FontWeight.w500,
+                      height: 1.0,
+                      letterSpacing: 0.5,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+        // 日历区域（底部上方）
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 98, // 向下移动10px
+          child: SizedBox(
+            height: 350, // 容器高度缩小，避免侵占其他空间
+            child: _CalendarSwiper(),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// 轨迹页内容部分
+class TrailPageContent extends StatefulWidget {
+  final DateTime birthday;
+  final int targetAge;
+  const TrailPageContent({
+    Key? key,
+    required this.birthday,
+    required this.targetAge,
+  }) : super(key: key);
+  @override
+  State<TrailPageContent> createState() => _TrailPageContentState();
+}
+
+class _TrailPageContentState extends State<TrailPageContent> {
+  // 示例日记数据
+  List<Map<String, dynamic>> _diaryEntries = [
+    {
+      'id': 1,
+      'title': '攀登一座雪山',
+      'content': '这是2024年7月7日的完整日记内容，记录了攀登雪山的全过程，包括准备、挑战和收获。',
+      'date': DateTime(2024, 7, 7),
+      'mood': 'happy',
+    },
+  ];
+  late Map<String, int> countdown;
+  final double numberFontSize = 86.0;
+  final double barSpacing = 24.0;
+  String search = '';
+
+  @override
+  void initState() {
+    super.initState();
+    countdown = getCountdown(widget.birthday, widget.targetAge);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = _diaryEntries.where((d) =>
+      d['title'].toString().contains(search) ||
+      d['content'].toString().contains(search) ||
+      DateFormat('yyyy MM dd').format(d['date']).contains(search)
+    ).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(height: 98),
+        // 悬浮倒计时
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _buildCountdownNumberOnly(countdown['years']!, numberFontSize),
+            SizedBox(width: barSpacing),
+            _buildCountdownNumberOnly(countdown['months']!, numberFontSize),
+            SizedBox(width: barSpacing),
+            _buildCountdownNumberOnly(countdown['days']!, numberFontSize),
+          ],
+        ),
+        SizedBox(height: 40),
+        // 'BEFORE I TURN 80' 英文标题
+        Center(
+          child: Text(
+            'BEFORE I TURN 80',
+            style: TextStyle(
+              color: Colors.black,
+              fontSize: 36.8,
+              fontFamily: 'Alibaba-PuHuiTi-Heavy',
+              fontWeight: FontWeight.w400,
+              letterSpacing: -0.5,
+            ),
+          ),
+        ),
+        SizedBox(height: 10),
+        // 搜索框
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12.0),
+          child: Container(
+            height: 44,
+            decoration: BoxDecoration(
+              color: Color(0xCCC0BBB7).withOpacity(0.32),
+              borderRadius: BorderRadius.circular(28),
+            ),
+            child: Row(
+              children: [
+                SizedBox(width: 16),
+                Icon(Icons.search, color: Color(0xFF231815), size: 28),
+                SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    onChanged: (v) => setState(() => search = v),
+                    style: TextStyle(
+                      color: Color(0xFF231815),
+                      fontSize: 18,
+                      fontFamily: 'Alibaba-PuHuiTi-Medium',
+                      fontWeight: FontWeight.w500,
+                    ),
+                    decoration: InputDecoration(
+                      hintText: '关键词搜索',
+                      hintStyle: TextStyle(color: Color(0xFFB0ADA9)),
+                      border: InputBorder.none,
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(vertical: 8),
+                    ),
+                  ),
+                ),
+                SizedBox(width: 16),
+              ],
+            ),
+          ),
+        ),
+        SizedBox(height: 10),
+        // 日记列表（自动填满剩余空间）
+        Expanded(
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            itemCount: filtered.length,
+            separatorBuilder: (context, index) => const SizedBox(height: 12),
+            itemBuilder: (context, index) {
+              final entry = filtered[index];
+              return GestureDetector(
+                onTap: () async {
+                  final result = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => DiaryEditPage(entry: entry),
+                    ),
+                  );
+                  if (result != null && result is Map<String, dynamic>) {
+                    setState(() {
+                      _diaryEntries[index] = result;
+                    });
+                  }
+                },
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+                  child: Row(
+                    children: [
+                      Text(
+                        DateFormat('yyyy MM dd').format(entry['date']),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Text(
+                          entry['title'],
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Icon(Icons.more_horiz, color: Colors.white),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _buildCountdownNumber(int num, String label, double numSize, double labelSize) {
+    return Column(
+      children: [
+        Text(
+          num.toString().padLeft(2, '0'),
+          style: TextStyle(
+            color: Colors.black,
+            fontSize: numSize,
+            fontFamily: 'Alibaba-PuHuiTi-Heavy',
+            fontWeight: FontWeight.w400,
+          ),
+        ),
+        SizedBox(height: 2),
+        SizedBox(height: 6), // 数字和英文间距6px
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.red, // 标记为红色
+            fontSize: labelSize,
+            fontFamily: 'Alibaba-PuHuiTi-Light',
+            fontWeight: FontWeight.w100,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCountdownNumberOnly(int num, double numSize) {
+    return Text(
+      num.toString().padLeft(2, '0'),
+      style: TextStyle(
+        color: Colors.black,
+        fontSize: numSize,
+        fontFamily: 'Alibaba-PuHuiTi-Heavy',
+        fontWeight: FontWeight.w400,
+      ),
+    );
+  }
+  Widget _buildCountdownLabelOnly(String label, double labelSize) {
+    return Text(
+      label,
+      style: TextStyle(
+        color: Colors.red, // 标记为红色
+        fontSize: labelSize,
+        fontFamily: 'Alibaba-PuHuiTi-Light',
+        fontWeight: FontWeight.w100,
+      ),
+    );
+  }
+}
+
+// 基础底部导航栏组件
+class BottomNavBar extends StatelessWidget {
+  final int currentIndex;
+  final Function(int) onTap;
+  const BottomNavBar({Key? key, required this.currentIndex, required this.onTap}) : super(key: key);
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 64,
+      decoration: BoxDecoration(
+        color: Color(0xFF231815),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 8,
+            offset: Offset(0, -2),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _buildNavItem(
+            icon: Icons.today,
+            label: '今日 TODAY',
+            selected: currentIndex == 0,
+            onTap: () => onTap(0),
+          ),
+          _buildNavItem(
+            icon: Icons.timeline,
+            label: '轨迹 TRAIL',
+            selected: currentIndex == 1,
+            onTap: () => onTap(1),
+          ),
+        ],
+      ),
+    );
+  }
+  Widget _buildNavItem({required IconData icon, required String label, required bool selected, required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: Duration(milliseconds: 320),
+        curve: Curves.easeOutCubic,
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? Color(0x33865FC1) : Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              color: selected ? Color(0xFF865FC1) : Color(0xFFC0BBB7),
+              size: 28,
+            ),
+            SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                color: selected ? Color(0xFF865FC1) : Color(0xFFC0BBB7),
+                fontFamily: selected ? 'Alibaba-PuHuiTi-Heavy' : 'Alibaba-PuHuiTi-Light',
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// 日历滑动组件，保持原UI不变，仅包裹滑动逻辑
+class _CalendarSwiper extends StatefulWidget {
+  @override
+  State<_CalendarSwiper> createState() => _CalendarSwiperState();
+}
+
+class _CalendarSwiperState extends State<_CalendarSwiper> {
+  late PageController _pageController;
+  int _pageIndex = 1; // 0:上月 1:当前月 2:下月
+  late DateTime _baseDate;
+  final DateTime _today = DateTime(DateTime.now().year, DateTime.now().month);
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    _baseDate = DateTime(now.year, now.month);
+    _pageController = PageController(initialPage: _pageIndex);
+  }
+
+  void jumpToCurrentMonth() async {
+    setState(() {
+      _baseDate = _today;
+    });
+    int currentPage = _pageController.page?.round() ?? 1;
+    if (currentPage < 1) {
+      await _pageController.animateToPage(0, duration: Duration(milliseconds: 180), curve: Curves.linear);
+      await Future.delayed(Duration(milliseconds: 30));
+      await _pageController.animateToPage(1, duration: Duration(milliseconds: 420), curve: Curves.elasticOut);
+    } else if (currentPage > 1) {
+      await _pageController.animateToPage(2, duration: Duration(milliseconds: 180), curve: Curves.linear);
+      await Future.delayed(Duration(milliseconds: 30));
+      await _pageController.animateToPage(1, duration: Duration(milliseconds: 420), curve: Curves.elasticOut);
+    } else {
+      await _pageController.animateToPage(1, duration: Duration(milliseconds: 420), curve: Curves.elasticOut);
+    }
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  DateTime _getMonthDate(int offset) {
+    return DateTime(_baseDate.year, _baseDate.month + offset);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: Key('calendar_container'),
+      margin: EdgeInsets.symmetric(horizontal: 16),
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Color(0xFF231815),
+        borderRadius: BorderRadius.circular(40),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return PageView.builder(
+            controller: _pageController,
+            itemCount: 3,
+            physics: ClampingScrollPhysics(),
+            onPageChanged: (index) {
+              if (index == 0) {
+                setState(() {
+                  _baseDate = DateTime(_baseDate.year, _baseDate.month - 1);
+                  _pageController.jumpToPage(1);
+                });
+              } else if (index == 2) {
+                setState(() {
+                  _baseDate = DateTime(_baseDate.year, _baseDate.month + 1);
+                  _pageController.jumpToPage(1);
+                });
+              }
+            },
+            itemBuilder: (context, index) {
+              int offset = index - 1;
+              DateTime showDate = _getMonthDate(offset);
+              return _CalendarStaticView(showDate: showDate);
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+// 保持原日历UI不变，抽出为静态渲染组件
+class _CalendarStaticView extends StatelessWidget {
+  final DateTime showDate;
+  const _CalendarStaticView({required this.showDate});
+
+  List<int> getMockContentDays(int year, int month) {
+    final now = DateTime.now();
+    if (year == now.year && month == now.month) {
+      return [5, 12, 18];
+    }
+    return [];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final year = showDate.year;
+    final month = showDate.month;
+    final today = DateTime.now();
+    final isCurrentMonth = (today.year == year && today.month == month);
+    final firstDayOfWeek = DateTime(year, month, 1).weekday % 7;
+    final daysInMonth = DateTime(year, month + 1, 0).day;
+    final lastMonthDays = DateTime(year, month, 0).day;
+    final contentDays = getMockContentDays(year, month);
+    return Stack(
+      children: [
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day) => Expanded(
+                child: Text(
+                  day,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w400,
+                    color: ['M','T','W','T','F','S','S'].indexOf(day) == (DateTime.now().weekday % 7)
+                        ? Color(0xFFF86E00)
+                        : Color(0xFFC0BBB7),
+                    letterSpacing: 1.5,
+                  ),
+                ),
+              )).toList(),
+            ),
+            SizedBox(height: 8),
+            Column(
+              children: List.generate(5, (weekIndex) {
+                return Padding(
+                  padding: EdgeInsets.only(bottom: weekIndex < 4 ? 0.0 : 0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: List.generate(7, (dayIndex) {
+                      final cellIndex = weekIndex * 7 + dayIndex;
+                      int dayNumber = cellIndex - firstDayOfWeek + 1;
+                      bool isPrevMonth = dayNumber <= 0;
+                      bool isNextMonth = dayNumber > daysInMonth;
+                      bool isCurrentMonth = !isPrevMonth && !isNextMonth;
+                      bool isToday = isCurrentMonth && (year == today.year && month == today.month && dayNumber == today.day);
+                      bool isPast = isCurrentMonth && (year < today.year || (year == today.year && month < today.month) || (year == today.year && month == today.month && dayNumber < today.day));
+                      bool isFuture = isCurrentMonth && (year > today.year || (year == today.year && month > today.month) || (year == today.year && month == today.month && dayNumber > today.day));
+                      bool hasContent = isCurrentMonth && contentDays.contains(dayNumber);
+                      Color fillColor;
+                      Color? borderColor;
+                      if (isPrevMonth || isNextMonth) {
+                        fillColor = Color(0xFF231815);
+                        borderColor = Color(0xFF727171);
+                      } else if (isToday) {
+                        fillColor = Color(0xFFF86E00);
+                        borderColor = null;
+                      } else if (hasContent) {
+                        fillColor = Color(0xFF9F91BA);
+                        borderColor = null;
+                      } else if (isPast) {
+                        fillColor = Color(0xFFC0BBB7);
+                        borderColor = null;
+                      } else if (isFuture) {
+                        fillColor = Color(0xFF727171);
+                        borderColor = null;
+                      } else {
+                        fillColor = Color(0xFF231815);
+                        borderColor = Color(0xFF727171);
+                      }
+                      Widget dayCircle = Container(
+                        margin: EdgeInsets.all(1.5),
+                        child: Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: fillColor,
+                            shape: BoxShape.circle,
+                            border: borderColor != null ? Border.all(color: borderColor, width: 1) : null,
+                          ),
+                        ),
+                      );
+                      if (hasContent) {
+                        return Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              showDialog(
+                                context: context,
+                                builder: (ctx) {
+                                  return AlertDialog(
+                                    title: Text('日记预览'),
+                                    content: Text('这是${year}年${month}月${dayNumber}日的模拟日记内容。'),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.of(ctx).pop(),
+                                        child: Text('关闭'),
+                                      ),
+                                    ],
+                                  );
+                                },
+                              );
+                            },
+                            child: dayCircle,
+                          ),
+                        );
+                      } else {
+                        return Expanded(child: dayCircle);
+                      }
+                    }),
+                  ),
+                );
+              }),
+            ),
+            SizedBox(height: 32),
+          ],
+        ),
+        Positioned(
+          left: 16,
+          bottom: 2,
+          child: Text(
+            '${year.toString().padLeft(4, '0')}.${month.toString().padLeft(2, '0')}',
+            style: TextStyle(
+              color: Color(0xFFCBCAC7),
+              fontSize: 13,
+              fontFamily: 'Alibaba-PuHuiTi-Light',
+              fontWeight: FontWeight.w400,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+        if (!isCurrentMonth)
+          Positioned(
+            right: 16,
+            bottom: 2,
+            child: GestureDetector(
+              onTap: () {
+                final _calendarSwiperState = context.findAncestorStateOfType<_CalendarSwiperState>();
+                _calendarSwiperState?.jumpToCurrentMonth();
+              },
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Color(0xFFB0ADA9).withOpacity(0.13),
+                  borderRadius: BorderRadius.circular(18),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.06),
+                      blurRadius: 6,
+                      offset: Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Text(
+                  '回到本月',
+                  style: TextStyle(
+                    color: Color(0xFFB0ADA9),
+                    fontSize: 12,
+                    fontFamily: 'Alibaba-PuHuiTi-Light',
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+Future<DateTime?> showCustomDatePicker({
+  required BuildContext context,
+  required DateTime initialDate,
+  required DateTime firstDate,
+  required DateTime lastDate,
+}) async {
+  DateTime tempDate = initialDate;
+  String? errorText;
+  return await showGeneralDialog<DateTime>(
+    context: context,
+    barrierDismissible: true,
+    barrierLabel: '选择日期',
+    barrierColor: Colors.black.withOpacity(0.18),
+    transitionDuration: Duration(milliseconds: 320),
+    pageBuilder: (context, anim1, anim2) {
+      return const SizedBox.shrink();
+    },
+    transitionBuilder: (context, anim1, anim2, child) {
+      final scale = Tween<double>(begin: 0.92, end: 1.0).animate(CurvedAnimation(parent: anim1, curve: Curves.easeOutBack));
+      final opacity = Tween<double>(begin: 0, end: 1).animate(CurvedAnimation(parent: anim1, curve: Curves.easeOutCubic));
+      return AnimatedBuilder(
+        animation: anim1,
+        builder: (context, _) {
+          return Opacity(
+            opacity: opacity.value,
+            child: Transform.scale(
+              scale: scale.value,
+              child: Center(
+                child: Material(
+                  color: Colors.transparent,
+                  child: StatefulBuilder(
+                    builder: (context, setStateDialog) {
+                      return Container(
+                        width: 340,
+                        padding: EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: Color(0xFFF8F6F3),
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('选择日期', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                                IconButton(
+                                  icon: Icon(Icons.edit, size: 22),
+                                  tooltip: '手动输入',
+                                  onPressed: () async {
+                                    final inputController = TextEditingController();
+                                    String? inputError;
+                                    await showDialog(
+                                      context: context,
+                                      builder: (ctx) {
+                                        return StatefulBuilder(
+                                          builder: (ctx, setStateInput) {
+                                            return AlertDialog(
+                                              title: Text('手动输入日期'),
+                                              content: TextField(
+                                                controller: inputController,
+                                                autofocus: true,
+                                                decoration: InputDecoration(
+                                                  hintText: '如19980101、1998.01.01、1998/01/01、1998-01-01',
+                                                  errorText: inputError,
+                                                  filled: true,
+                                                  fillColor: Color(0xFFDBD8D3),
+                                                  border: OutlineInputBorder(
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    borderSide: BorderSide(color: Color(0xFFDBD8D3)),
+                                                  ),
+                                                  enabledBorder: OutlineInputBorder(
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    borderSide: BorderSide(color: Color(0xFFDBD8D3)),
+                                                  ),
+                                                  focusedBorder: OutlineInputBorder(
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    borderSide: BorderSide(color: Color(0xFF865FC1)),
+                                                  ),
+                                                ),
+                                              ),
+                                              actions: [
+                                                TextButton(
+                                                  onPressed: () => Navigator.of(ctx).pop(),
+                                                  child: Text('取消'),
+                                                ),
+                                                TextButton(
+                                                  onPressed: () {
+                                                    final input = inputController.text.trim();
+                                                    DateTime? parsed = (_TodayPageContentState()._parseFlexibleDate(input));
+                                                    if (parsed == null) {
+                                                      setStateInput(() {
+                                                        inputError = '无法识别日期格式';
+                                                      });
+                                                    } else if (parsed.isBefore(firstDate) || parsed.isAfter(lastDate)) {
+                                                      setStateInput(() {
+                                                        inputError = '超出可选范围';
+                                                      });
+                                                    } else {
+                                                      Navigator.of(ctx).pop();
+                                                      Navigator.of(context).pop(parsed);
+                                                    }
+                                                  },
+                                                  child: Text('确定'),
+                                                ),
+                                              ],
+                                            );
+                                          },
+                                        );
+                                      },
+                                    );
+                                  },
+                                ),
+                              ],
+                            ),
+                            SizedBox(height: 8),
+                            // 显示当前选中日期
+                            Text(
+                              '${tempDate.year}年${tempDate.month.toString().padLeft(2, '0')}月${tempDate.day.toString().padLeft(2, '0')}日 ${['日','一','二','三','四','五','六'][tempDate.weekday%7]}',
+                              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w500),
+                            ),
+                            SizedBox(height: 8),
+                            // 日历网格
+                            CalendarDatePicker(
+                              initialDate: tempDate,
+                              firstDate: firstDate,
+                              lastDate: lastDate,
+                              onDateChanged: (d) => setStateDialog(() => tempDate = d),
+                            ),
+                            if (errorText != null)
+                              Padding(
+                                padding: EdgeInsets.only(top: 8),
+                                child: Text(errorText!, style: TextStyle(color: Colors.red)),
+                              ),
+                            SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                TextButton(
+                                  onPressed: () => Navigator.of(context).pop(),
+                                  child: Text('取消'),
+                                ),
+                                SizedBox(width: 8),
+                                TextButton(
+                                  onPressed: () => Navigator.of(context).pop(tempDate),
+                                  child: Text('确定'),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+}
