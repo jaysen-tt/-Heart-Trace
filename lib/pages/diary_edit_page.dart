@@ -11,6 +11,9 @@ import 'package:path_provider/path_provider.dart';
 import '../utils/image_utils.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
+import 'package:image_gallery_saver/image_gallery_saver.dart';
+import 'package:flutter/services.dart';
+import 'package:reorderables/reorderables.dart';
 
 class DiaryEditPage extends StatefulWidget {
   final Map<String, dynamic>? entry;
@@ -34,6 +37,8 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
   final AudioPlayer _audioPlayer = AudioPlayer();
   bool _isRecording = false;
   String? _playingAudio;
+  bool _isMultiSelect = false;
+  List<bool> _selectedImages = [];
 
   @override
   void initState() {
@@ -99,36 +104,55 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
   }
 
   Future<void> _pickImage() async {
-    final XFile? image = await _picker.pickImage(
-      source: await showModalBottomSheet<ImageSource>(
-        context: context,
-        builder: (ctx) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: Icon(Icons.camera_alt),
-                title: Text('拍照'),
-                onTap: () => Navigator.pop(ctx, ImageSource.camera),
-              ),
-              ListTile(
-                leading: Icon(Icons.photo_library),
-                title: Text('相册'),
-                onTap: () => Navigator.pop(ctx, ImageSource.gallery),
-              ),
-            ],
-          ),
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(Icons.camera_alt),
+              title: Text('拍照'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: Icon(Icons.photo_library),
+              title: Text('相册（多选）'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+          ],
         ),
-      ) ?? ImageSource.gallery,
-      imageQuality: 90,
-      maxWidth: 1200,
+      ),
     );
-    if (image != null) {
-      // 复制到私有目录
-      final newPath = await ImageUtils.copyToPrivateDir(image.path);
-      setState(() {
-        _images.add(XFile(newPath));
-      });
+    if (source == ImageSource.camera) {
+      final XFile? image = await _picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 90,
+        maxWidth: 1200,
+      );
+      if (image != null) {
+        final newPath = await ImageUtils.copyToPrivateDir(image.path);
+        setState(() {
+          _images.add(XFile(newPath));
+          _selectedImages.add(false);
+        });
+      }
+    } else if (source == ImageSource.gallery) {
+      final List<XFile>? images = await _picker.pickMultiImage(
+        imageQuality: 90,
+        maxWidth: 1200,
+      );
+      if (images != null && images.isNotEmpty) {
+        final List<XFile> copied = [];
+        for (final img in images) {
+          final newPath = await ImageUtils.copyToPrivateDir(img.path);
+          copied.add(XFile(newPath));
+        }
+        setState(() {
+          _images.addAll(copied);
+          _selectedImages.addAll(List.generate(copied.length, (i) => false));
+        });
+      }
     }
   }
 
@@ -226,7 +250,58 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
           ),
         ),
         centerTitle: true,
-        actions: [],
+        // AppBar actions 恢复更多按钮，补充“添加照片”入口
+        actions: [
+          IconButton(
+            icon: Icon(Icons.more_vert, color: Colors.black54),
+            onPressed: () async {
+              final action = await showModalBottomSheet<String>(
+                context: context,
+                builder: (ctx) => SafeArea(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ListTile(
+                        leading: Icon(Icons.photo_library),
+                        title: Text('添加照片'),
+                        onTap: () => Navigator.pop(ctx, 'add_photo'),
+                      ),
+                      ListTile(
+                        leading: Icon(Icons.insert_drive_file),
+                        title: Text('添加文件'),
+                        onTap: () => Navigator.pop(ctx, 'add_file'),
+                      ),
+                      ListTile(
+                        leading: Icon(Icons.mic),
+                        title: Text('录音'),
+                        onTap: () => Navigator.pop(ctx, 'record'),
+                      ),
+                      ListTile(
+                        leading: Icon(Icons.manage_accounts),
+                        title: Text('批量管理/排序'),
+                        onTap: () => Navigator.pop(ctx, 'manage'),
+                      ),
+                      ListTile(
+                        leading: Icon(Icons.cancel),
+                        title: Text('取消'),
+                        onTap: () => Navigator.pop(ctx, null),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+              if (action == 'add_photo') {
+                await _pickImage();
+              } else if (action == 'add_file') {
+                await _pickFile();
+              } else if (action == 'record') {
+                await _toggleRecord();
+              } else if (action == 'manage') {
+                setState(() => _isMultiSelect = true);
+              }
+            },
+          ),
+        ],
       ),
       body: SafeArea(
         child: Stack(
@@ -291,20 +366,19 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
                   ),
                   SizedBox(height: 8),
                   // 图片/附件区域
-                  if (_images.isNotEmpty || _files.isNotEmpty || _audioPaths.isNotEmpty || true)
-                    SizedBox(
-                      height: 90,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: _images.length + _files.length + _audioPaths.length + 3,
-                        separatorBuilder: (_, __) => SizedBox(width: 12),
-                        itemBuilder: (context, idx) {
-                          // 图片
-                          if (idx < _images.length) {
-                            final img = _images[idx];
-                            return Stack(
-                              children: [
-                                GestureDetector(
+                  if (_images.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8, bottom: 8),
+                      child: SizedBox(
+                        height: 90,
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: List.generate(_images.length, (idx) {
+                              final img = _images[idx];
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 12),
+                                child: GestureDetector(
                                   onTap: () => showDialog(
                                     context: context,
                                     barrierDismissible: true,
@@ -312,27 +386,15 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
                                       backgroundColor: Colors.transparent,
                                       insetPadding: EdgeInsets.zero,
                                       child: SizedBox.expand(
-                                        child: Stack(
-                                          children: [
-                                            PhotoViewGallery(
-                                              pageOptions: _images.map((img) => PhotoViewGalleryPageOptions(
-                                                imageProvider: FileImage(File(img.path)),
-                                                minScale: PhotoViewComputedScale.contained,
-                                                maxScale: PhotoViewComputedScale.covered * 3.0,
-                                              )).toList(),
-                                              backgroundDecoration: BoxDecoration(color: Colors.black),
-                                              pageController: PageController(initialPage: idx),
-                                              loadingBuilder: (context, event) => Center(child: CircularProgressIndicator()),
-                                            ),
-                                            Positioned(
-                                              top: 40,
-                                              right: 20,
-                                              child: IconButton(
-                                                icon: Icon(Icons.close, color: Colors.white, size: 32),
-                                                onPressed: () => Navigator.of(context).pop(),
-                                              ),
-                                            ),
-                                          ],
+                                        child: _FullScreenImageGallery(
+                                          images: _images,
+                                          initialIndex: idx,
+                                          onDelete: (index) {
+                                            setState(() {
+                                              _images.removeAt(index);
+                                              _selectedImages.removeAt(index);
+                                            });
+                                          },
                                         ),
                                       ),
                                     ),
@@ -347,155 +409,10 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
                                     ),
                                   ),
                                 ),
-                                Positioned(
-                                  top: 2,
-                                  right: 2,
-                                  child: GestureDetector(
-                                    onTap: () => setState(() => _images.removeAt(idx)),
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        color: Colors.black54,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: Icon(Icons.close, color: Colors.white, size: 18),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            );
-                          }
-                          // 文件
-                          if (idx < _images.length + _files.length) {
-                            final file = _files[idx - _images.length];
-                            return Stack(
-                              children: [
-                                GestureDetector(
-                                  onTap: () => _openFile(file),
-                                  child: Container(
-                                    width: 80,
-                                    height: 80,
-                                    decoration: BoxDecoration(
-                                      color: Colors.blueGrey[50],
-                                      borderRadius: BorderRadius.circular(16),
-                                    ),
-                                    child: Center(
-                                      child: Column(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [
-                                          Icon(Icons.insert_drive_file, color: Colors.blueGrey, size: 32),
-                                          SizedBox(height: 4),
-                                          Text(
-                                            file.name,
-                                            style: TextStyle(fontSize: 11, color: Colors.black54),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                Positioned(
-                                  top: 2,
-                                  right: 2,
-                                  child: GestureDetector(
-                                    onTap: () => setState(() => _files.removeAt(idx - _images.length)),
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        color: Colors.black54,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: Icon(Icons.close, color: Colors.white, size: 18),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            );
-                          }
-                          // 录音
-                          if (idx < _images.length + _files.length + _audioPaths.length) {
-                            final audio = _audioPaths[idx - _images.length - _files.length];
-                            final isPlaying = _playingAudio == audio;
-                            return Stack(
-                              children: [
-                                GestureDetector(
-                                  onTap: () => _playAudio(audio),
-                                  child: Container(
-                                    width: 80,
-                                    height: 80,
-                                    decoration: BoxDecoration(
-                                      color: Colors.deepPurple[50],
-                                      borderRadius: BorderRadius.circular(16),
-                                    ),
-                                    child: Center(
-                                      child: Icon(
-                                        isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill,
-                                        color: Colors.deepPurple,
-                                        size: 36,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                Positioned(
-                                  top: 2,
-                                  right: 2,
-                                  child: GestureDetector(
-                                    onTap: () => setState(() => _audioPaths.removeAt(idx - _images.length - _files.length)),
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        color: Colors.black54,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: Icon(Icons.close, color: Colors.white, size: 18),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            );
-                          }
-                          // 添加图片按钮
-                          if (idx == _images.length + _files.length + _audioPaths.length) {
-                            return GestureDetector(
-                              onTap: _pickImage,
-                              child: Container(
-                                width: 80,
-                                height: 80,
-                                decoration: BoxDecoration(
-                                  color: Colors.grey[200],
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                child: Icon(Icons.add_a_photo, color: Colors.black38, size: 32),
-                              ),
-                            );
-                          }
-                          // 添加文件按钮
-                          if (idx == _images.length + _files.length + _audioPaths.length + 1) {
-                            return GestureDetector(
-                              onTap: _pickFile,
-                              child: Container(
-                                width: 80,
-                                height: 80,
-                                decoration: BoxDecoration(
-                                  color: Colors.grey[200],
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                child: Icon(Icons.attach_file, color: Colors.black38, size: 32),
-                              ),
-                            );
-                          }
-                          // 添加录音按钮
-                          return GestureDetector(
-                            onTap: _toggleRecord,
-                            child: Container(
-                              width: 80,
-                              height: 80,
-                              decoration: BoxDecoration(
-                                color: _isRecording ? Colors.red[100] : Colors.grey[200],
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: Icon(_isRecording ? Icons.stop : Icons.mic, color: _isRecording ? Colors.red : Colors.black38, size: 32),
-                            ),
-                          );
-                        },
+                              );
+                            }),
+                          ),
+                        ),
                       ),
                     ),
                   SizedBox(height: 8),
@@ -556,6 +473,131 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
           ],
         ),
       ),
+    );
+  }
+}
+
+// 新增全屏图片浏览组件，支持下载和长按保存
+class _FullScreenImageGallery extends StatefulWidget {
+  final List<XFile> images;
+  final int initialIndex;
+  final Function(int)? onDelete;
+  const _FullScreenImageGallery({required this.images, required this.initialIndex, this.onDelete});
+  @override
+  State<_FullScreenImageGallery> createState() => _FullScreenImageGalleryState();
+}
+
+class _FullScreenImageGalleryState extends State<_FullScreenImageGallery> {
+  late PageController _pageController;
+  late int _currentIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex;
+    _pageController = PageController(initialPage: _currentIndex);
+  }
+
+  Future<void> _saveImage() async {
+    final file = File(widget.images[_currentIndex].path);
+    final bytes = await file.readAsBytes();
+    final result = await ImageGallerySaver.saveImage(bytes);
+    if (result['isSuccess'] == true || result['isSuccess'] == 1) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已保存到相册')));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('保存失败')));
+    }
+  }
+
+  void _onLongPress() async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(Icons.save_alt),
+              title: Text('保存到相册'),
+              onTap: () => Navigator.pop(ctx, 'save'),
+            ),
+            ListTile(
+              leading: Icon(Icons.cancel),
+              title: Text('取消'),
+              onTap: () => Navigator.pop(ctx, null),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == 'save') {
+      await _saveImage();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        PhotoViewGallery(
+          pageOptions: widget.images.map((img) => PhotoViewGalleryPageOptions(
+            imageProvider: FileImage(File(img.path)),
+            minScale: PhotoViewComputedScale.contained,
+            maxScale: PhotoViewComputedScale.covered * 3.0,
+            heroAttributes: PhotoViewHeroAttributes(tag: img.path),
+            // onTapUp: (_, __, ___) {},
+          )).toList(),
+          backgroundDecoration: BoxDecoration(color: Colors.black),
+          pageController: _pageController,
+          loadingBuilder: (context, event) => Center(child: CircularProgressIndicator()),
+          onPageChanged: (i) => setState(() => _currentIndex = i),
+        ),
+        // 用手势包裹，支持长按
+        Positioned.fill(
+          child: GestureDetector(
+            onLongPress: _onLongPress,
+            behavior: HitTestBehavior.translucent,
+            child: Container(),
+          ),
+        ),
+        Positioned(
+          top: 40,
+          right: 20,
+          child: Row(
+            children: [
+              IconButton(
+                icon: Icon(Icons.save_alt, color: Colors.white, size: 28),
+                onPressed: _saveImage,
+                tooltip: '保存到相册',
+              ),
+              SizedBox(width: 8),
+              IconButton(
+                icon: Icon(Icons.close, color: Colors.white, size: 32),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
+          ),
+        ),
+        if (widget.images.length > 1)
+          Positioned(
+            bottom: 40,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Text(
+                  '${_currentIndex + 1} / ${widget.images.length}',
+                  style: TextStyle(color: Colors.white, fontSize: 16),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
