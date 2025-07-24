@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
@@ -63,7 +64,7 @@ class ImageUtils {
       borderRadius: BorderRadius.circular(radius),
       boxShadow: [
         BoxShadow(
-          color: shadowColor.withOpacity(shadowOpacity),
+          color: shadowColor.withAlpha((shadowOpacity * 255).round()),
           blurRadius: blurRadius,
           offset: shadowOffset,
         ),
@@ -76,7 +77,7 @@ class ImageUtils {
     try {
       if (imagePath.startsWith('assets/')) {
         // asset图片，直接返回true（如需更严谨可用rootBundle.load判断）
-        return true;
+      return true;
       } else {
         return await File(imagePath).exists();
       }
@@ -97,4 +98,4 @@ class ImageUtils {
     final newFile = await File(originPath).copy(newPath);
     return newFile.path;
   }
-} 
+}

@@ -1,63 +1,95 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
-import 'package:file_picker/file_picker.dart';
-import 'package:open_file/open_file.dart';
+import 'dart:async';
+
 import 'package:record/record.dart';
-import 'package:audioplayers/audioplayers.dart';
-import 'package:path/path.dart' as path;
+import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
-import '../utils/image_utils.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
-import 'package:image_gallery_saver/image_gallery_saver.dart';
-import 'package:flutter/services.dart';
-import 'package:reorderables/reorderables.dart';
+import '../services/diary_local_storage.dart';
+import '../services/diary_entry.dart';
 
 class DiaryEditPage extends StatefulWidget {
-  final Map<String, dynamic>? entry;
+  final DiaryEntry? entry;
   const DiaryEditPage({super.key, this.entry});
   @override
   State<DiaryEditPage> createState() => _DiaryEditPageState();
 }
 
-class _DiaryEditPageState extends State<DiaryEditPage> {
+class _DiaryEditPageState extends State<DiaryEditPage> with SingleTickerProviderStateMixin {
+  // Mood definitions - moved to class level for access in initState
+  final List<Map<String, dynamic>> moods = [
+    {'name': '开心', 'icon': Icons.emoji_emotions, 'color': const Color(0xFFFFEB3B)},
+    {'name': '平静', 'icon': Icons.accessibility_new, 'color': const Color(0xFF2196F3)},
+    {'name': '高效', 'icon': Icons.check_circle, 'color': const Color(0xFF4CAF50)},
+    {'name': '担忧', 'icon': Icons.warning, 'color': const Color(0xFFFF9800)},
+    {'name': '生气', 'icon': Icons.emoji_emotions_outlined, 'color': const Color(0xFFF44336)},
+    {'name': '难过', 'icon': Icons.emoji_events, 'color': const Color(0xFF607D8B)},
+    {'name': 'neutral', 'icon': Icons.sentiment_neutral, 'color': const Color(0xFF9E9E9E)},
+  ];
+
   final _titleController = TextEditingController();
   final _contentController = TextEditingController();
   String? _selectedMood;
   DateTime _selectedDate = DateTime.now();
   int _contentLength = 0;
   final List<XFile> _images = [];
-  final ImagePicker _picker = ImagePicker();
-  final List<PlatformFile> _files = [];
+
+
   // 录音文件列表（可扩展）
   final List<String> _audioPaths = [];
   final AudioRecorder _recorder = AudioRecorder();
-  final AudioPlayer _audioPlayer = AudioPlayer();
   bool _isRecording = false;
-  String? _playingAudio;
-  bool _isMultiSelect = false;
-  List<bool> _selectedImages = [];
+  late Timer _recordingTimer;
+  int _recordingSeconds = 0;
+  late AnimationController _animationController;
+  late Animation<double> _scaleAnimation;
+  late Animation<Color?> _colorAnimation;
+
+  void _initAnimations() {
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 200),
+    );
+
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    );
+
+    _colorAnimation = ColorTween(begin: Colors.blue, end: Colors.red).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    );
+  }
 
   @override
   void initState() {
     super.initState();
+    _initAnimations();
     if (widget.entry != null) {
-      _titleController.text = widget.entry!['title'];
-      _contentController.text = widget.entry!['content'];
-      _selectedMood = widget.entry!['mood'];
-      _selectedDate = widget.entry!['date'];
-      // 附件还原
-      if (widget.entry!['images'] != null) {
-        _images.addAll((widget.entry!['images'] as List).map((e) => XFile(e.toString())));
-      }
-      if (widget.entry!['files'] != null) {
-        _files.addAll((widget.entry!['files'] as List).map((e) => PlatformFile(name: e.toString().split('/').last, path: e.toString(), size: 0)));
-      }
-      if (widget.entry!['audios'] != null) {
-        _audioPaths.addAll((widget.entry!['audios'] as List).map((e) => e.toString()));
-      }
+      _titleController.text = widget.entry!.title;
+      _contentController.text = widget.entry!.content;
+      // Handle mood conversion from old int type to new string type
+        if (widget.entry!.mood is int) {
+          final colorValue = widget.entry!.mood as int;
+          final matchingMood = moods.firstWhere(
+            (m) => (m['color'] as Color).value == colorValue,
+            orElse: () => moods.firstWhere((m) => m['name'] == 'neutral'),
+          );
+          _selectedMood = matchingMood['name'] as String;
+        } else if (widget.entry!.mood is String) {
+          _selectedMood = widget.entry!.mood as String;
+        } else {
+          _selectedMood = 'neutral';
+        }
+      _selectedDate = widget.entry!.date;
+      _images.addAll((widget.entry!.images).map((e) => XFile(e.toString())));
+
+      _audioPaths.addAll((widget.entry!.audios).map((e) => e.toString()));
     }
     _contentLength = _contentController.text.length;
     _contentController.addListener(() {
@@ -74,21 +106,44 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
     super.dispose();
   }
 
-  void _saveDiary() {
-    final newEntry = {
-      'id': widget.entry?['id'] ?? DateTime.now().millisecondsSinceEpoch,
-      'title': _titleController.text,
-      'content': _contentController.text,
-      'date': _selectedDate,
-      'mood': _selectedMood ?? 'neutral',
-      'images': _images.map((e) => e.path).toList(),
-      'files': _files.map((e) => e.path).toList(),
-      'audios': _audioPaths,
-    };
-    // 只保存，不自动返回
-    // 可扩展保存成功提示
-    // Navigator.pop(context, newEntry);
-    // 你可以在需要时手动返回
+  Future<void> _saveDiary() async {
+    // 处理新建日记时widget.entry为null的情况
+
+    final newEntry = DiaryEntry(
+      id: widget.entry?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
+      title: _titleController.text,
+      content: _contentController.text,
+      date: _selectedDate,
+      mood: _selectedMood ?? 'neutral',
+      images: _images.map((e) => e.path).toList(),
+
+      audios: _audioPaths,
+        files: [], // 满足构造函数必填参数要求
+  
+    );
+    try {
+      final storage = DiaryLocalStorage();
+      if (widget.entry != null) {
+        await storage.updateDiary(newEntry);
+      } else {
+        await storage.createDiary(newEntry);
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('日记保存成功！'),
+            duration: Duration(milliseconds: 500),
+          ),
+        );
+      }
+      if (mounted) Navigator.pop(context, newEntry);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('保存失败：$e')),
+        );
+      }
+    }
   }
 
   Future<void> _selectDate() async {
@@ -98,135 +153,148 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
       firstDate: DateTime(2000),
       lastDate: DateTime.now(),
     );
+    if (!mounted) return;
     if (picked != null && picked != _selectedDate) {
       setState(() => _selectedDate = picked);
     }
   }
 
-  Future<void> _pickImage() async {
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: Icon(Icons.camera_alt),
-              title: Text('拍照'),
-              onTap: () => Navigator.pop(ctx, ImageSource.camera),
-            ),
-            ListTile(
-              leading: Icon(Icons.photo_library),
-              title: Text('相册（多选）'),
-              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (source == ImageSource.camera) {
-      final XFile? image = await _picker.pickImage(
-        source: ImageSource.camera,
-        imageQuality: 90,
-        maxWidth: 1200,
-      );
-      if (image != null) {
-        final newPath = await ImageUtils.copyToPrivateDir(image.path);
-        setState(() {
-          _images.add(XFile(newPath));
-          _selectedImages.add(false);
-        });
-      }
-    } else if (source == ImageSource.gallery) {
-      final List<XFile>? images = await _picker.pickMultiImage(
-        imageQuality: 90,
-        maxWidth: 1200,
-      );
-      if (images != null && images.isNotEmpty) {
-        final List<XFile> copied = [];
-        for (final img in images) {
-          final newPath = await ImageUtils.copyToPrivateDir(img.path);
-          copied.add(XFile(newPath));
-        }
-        setState(() {
-          _images.addAll(copied);
-          _selectedImages.addAll(List.generate(copied.length, (i) => false));
-        });
-      }
-    }
-  }
-
-  Future<void> _pickFile() async {
-    final result = await FilePicker.platform.pickFiles();
-    if (result != null && result.files.isNotEmpty) {
-      setState(() {
-        _files.add(result.files.first);
-      });
-    }
-  }
-
-  Future<void> _openFile(PlatformFile file) async {
-    await OpenFile.open(file.path);
-  }
-
   Future<void> _toggleRecord() async {
     if (_isRecording) {
       final path = await _recorder.stop();
+      _recordingTimer.cancel();
+      if (!mounted) return;
       if (path != null) {
         setState(() {
           _audioPaths.add(path);
+          _recordingSeconds = 0;
         });
       }
+      Navigator.pop(context);
     } else {
+      // 检查麦克风权限
+      final status = await Permission.microphone.request();
+      if (!status.isGranted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('需要麦克风权限才能录音')),
+          );
+        }
+        return;
+      }
+
       final dir = await getTemporaryDirectory();
-      final filePath = path.join(dir.path, '${DateTime.now().millisecondsSinceEpoch}.m4a');
+      final filePath = '${dir.path}/${DateTime.now().millisecondsSinceEpoch}.m4a';
       await _recorder.start(const RecordConfig(), path: filePath);
+      if (!mounted) return;
+      setState(() {
+        _isRecording = true;
+        _recordingSeconds = 0;
+      });
+      _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (!mounted) return;
+        setState(() {
+          _recordingSeconds++;
+        });
+      });
+      // 显示录音对话框
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => _RecordingDialog(
+          onCancel: () async {
+            await _recorder.stop();
+            _recordingTimer.cancel();
+            setState(() {
+              _isRecording = false;
+              _recordingSeconds = 0;
+            });
+            Navigator.pop(context);
+          },
+          seconds: _recordingSeconds,
+        ),
+      );
     }
-    setState(() {
-      _isRecording = !_isRecording;
-    });
   }
 
-  Future<void> _playAudio(String path) async {
-    if (_playingAudio == path) {
-      await _audioPlayer.stop();
-      setState(() => _playingAudio = null);
-    } else {
-      await _audioPlayer.play(DeviceFileSource(path));
-      setState(() => _playingAudio = path);
-      _audioPlayer.onPlayerComplete.listen((_) {
-        setState(() => _playingAudio = null);
+  // 录音对话框组件
+  Widget _RecordingDialog({
+    required VoidCallback onCancel,
+    required int seconds,
+  }) {
+    return WillPopScope(
+      onWillPop: () async => false,
+      child: Center(
+        child: Container(
+          width: 180,
+          height: 180,
+          decoration: BoxDecoration(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.mic,
+                color: Colors.red,
+                size: 60,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                '正在录音... $seconds',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                '松开取消',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickImage() async {
+    final pickedFile = await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (!mounted) return;
+    if (pickedFile != null) {
+      setState(() {
+        _images.add(XFile(pickedFile.path));
       });
     }
   }
+
+
 
   @override
   Widget build(BuildContext context) {
     final dateStr = DateFormat('yyyy MM dd').format(_selectedDate);
-    final moods = [
-      {'name': '开心', 'icon': Icons.emoji_emotions, 'color': Colors.yellow},
-      {'name': '平静', 'icon': Icons.accessibility_new, 'color': Colors.blue},
-      {'name': '高效', 'icon': Icons.check_circle, 'color': Colors.green},
-      {'name': '担忧', 'icon': Icons.warning, 'color': Colors.orange},
-      {'name': '生气', 'icon': Icons.emoji_emotions_outlined, 'color': Colors.red},
-      {'name': '难过', 'icon': Icons.emoji_events, 'color': Colors.blueGrey},
-    ];
     return Scaffold(
-      backgroundColor: Color(0xFFDBD8D3),
+      backgroundColor: const Color(0xFFF9F7F5),
       resizeToAvoidBottomInset: true,
       appBar: AppBar(
         backgroundColor: Colors.white,
-        elevation: 0.5,
+        elevation: 0,
+        shadowColor: Colors.black12,
+        shape: const Border(bottom: BorderSide(color: Color(0x1A000000), width: 1)),
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new, color: Colors.black87),
+          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black87),
           onPressed: () => Navigator.pop(context, {
-            'id': widget.entry?['id'] ?? DateTime.now().millisecondsSinceEpoch,
+            'id': widget.entry?.id ?? (DateTime.now().millisecondsSinceEpoch % 0xFFFFFFFF),
             'title': _titleController.text,
             'content': _contentController.text,
             'date': _selectedDate,
             'mood': _selectedMood ?? 'neutral',
             'images': _images.map((e) => e.path).toList(),
-            'files': _files.map((e) => e.path).toList(),
+    
             'audios': _audioPaths,
           }),
         ),
@@ -237,23 +305,21 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
             children: [
               Text(
                 dateStr,
-                style: TextStyle(
+                style: const TextStyle(
                   color: Colors.black87,
                   fontSize: 18,
                   fontWeight: FontWeight.w500,
-                  letterSpacing: 1.2,
-                ),
+                  letterSpacing: 0.3
+                )
               ),
-              SizedBox(width: 6),
-              Icon(Icons.edit_calendar, color: Colors.black38, size: 18),
+              const SizedBox(width: 6),
             ],
           ),
         ),
         centerTitle: true,
-        // AppBar actions 恢复更多按钮，补充“添加照片”入口
         actions: [
           IconButton(
-            icon: Icon(Icons.more_vert, color: Colors.black54),
+            icon: const Icon(Icons.more_vert, color: Colors.black54),
             onPressed: () async {
               final action = await showModalBottomSheet<String>(
                 context: context,
@@ -262,28 +328,35 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       ListTile(
-                        leading: Icon(Icons.photo_library),
-                        title: Text('添加照片'),
+                        leading: const Icon(Icons.photo_library),
+                        title: const Text('添加照片'),
                         onTap: () => Navigator.pop(ctx, 'add_photo'),
                       ),
-                      ListTile(
-                        leading: Icon(Icons.insert_drive_file),
-                        title: Text('添加文件'),
-                        onTap: () => Navigator.pop(ctx, 'add_file'),
+
+                      AnimatedBuilder(
+                animation: _animationController,
+                builder: (context, child) {
+                  return Transform.scale(
+                    scale: _scaleAnimation.value,
+                    child: ListTile(
+                      leading: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: _colorAnimation.value,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.mic, color: Colors.white),
                       ),
+                      title: const Text('录音'),
+                      onTap: () => Navigator.pop(ctx, 'record'),
+                    ),
+                  );
+                },
+              ),
                       ListTile(
-                        leading: Icon(Icons.mic),
-                        title: Text('录音'),
-                        onTap: () => Navigator.pop(ctx, 'record'),
-                      ),
-                      ListTile(
-                        leading: Icon(Icons.manage_accounts),
-                        title: Text('批量管理/排序'),
-                        onTap: () => Navigator.pop(ctx, 'manage'),
-                      ),
-                      ListTile(
-                        leading: Icon(Icons.cancel),
-                        title: Text('取消'),
+                        leading: const Icon(Icons.cancel),
+                        title: const Text('取消'),
                         onTap: () => Navigator.pop(ctx, null),
                       ),
                     ],
@@ -292,197 +365,268 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
               );
               if (action == 'add_photo') {
                 await _pickImage();
-              } else if (action == 'add_file') {
-                await _pickFile();
               } else if (action == 'record') {
-                await _toggleRecord();
-              } else if (action == 'manage') {
-                setState(() => _isMultiSelect = true);
-              }
+                  await _toggleRecord();
+                }
             },
           ),
         ],
       ),
-      body: SafeArea(
-        child: Stack(
-          children: [
-            Padding(
-              padding: EdgeInsets.only(left: 16, right: 16, bottom: 0, top: 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // 标题
-                  TextField(
-                    controller: _titleController,
-                    style: TextStyle(
-                      color: Colors.black87,
-                      fontSize: 24,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    decoration: InputDecoration(
-                      border: InputBorder.none,
-                      hintText: '请输入标题',
-                      hintStyle: TextStyle(
-                        color: Colors.black26,
-                        fontSize: 24,
+      body: GestureDetector(
+        onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+        behavior: HitTestBehavior.translucent,
+        child: SafeArea(
+            child: Stack(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(left: 16, right: 16, bottom: 0, top: 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // 标题
+                      TextField(
+                        controller: _titleController,
+                        style: const TextStyle(
+                          color: Colors.black87,
+                          fontSize: 26,
+                          fontWeight: FontWeight.w600,
+                          height: 1.2,
+                        ),
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                          hintText: '请输入标题',
+                          hintStyle: TextStyle(
+                            color: Color(0xFF9CA3AF),
+                            fontSize: 26,
+                            fontWeight: FontWeight.w400,
+                          ),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                        maxLines: 1,
                       ),
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                    maxLines: 1,
-                  ),
-                  SizedBox(height: 8),
-                  // 心情选择
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: moods.map((mood) {
-                        final isSelected = _selectedMood == mood['name'];
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 12),
-                          child: ChoiceChip(
-                            label: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(mood['icon'] as IconData, color: isSelected ? mood['color'] as Color : Colors.grey[400], size: 18),
-                                SizedBox(width: 2),
-                                Text(
-                                  mood['name'] as String,
-                                  style: TextStyle(
-                                    color: isSelected ? mood['color'] as Color : Colors.grey[400],
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ],
+                      const SizedBox(height: 8),
+                      // 心情选择
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: moods.map((mood) {
+                            final isSelected = _selectedMood == mood['name'];
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 12),
+                              child: ChoiceChip(
+                                label: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(mood['icon'] as IconData, color: isSelected ? mood['color'] as Color : Colors.grey[400], size: 18),
+                                    const SizedBox(width: 2),
+                                    Text(
+                                      mood['name'] as String,
+                                      style: TextStyle(
+                              color: isSelected ? mood['color'] as Color : const Color(0xFF6B7280),
+                              fontSize: 14,
+                              fontWeight: isSelected ? FontWeight.w500 : FontWeight.w400,
                             ),
-                            selected: isSelected,
-                            selectedColor: Colors.grey[200],
-                            backgroundColor: Colors.transparent,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                            onSelected: (_) => setState(() => _selectedMood = mood['name'] as String),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                  SizedBox(height: 8),
-                  // 图片/附件区域
-                  if (_images.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8, bottom: 8),
-                      child: SizedBox(
-                        height: 90,
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: List.generate(_images.length, (idx) {
-                              final img = _images[idx];
-                              return Padding(
-                                padding: const EdgeInsets.only(right: 12),
-                                child: GestureDetector(
-                                  onTap: () => showDialog(
-                                    context: context,
-                                    barrierDismissible: true,
-                                    builder: (_) => Dialog(
-                                      backgroundColor: Colors.transparent,
-                                      insetPadding: EdgeInsets.zero,
-                                      child: SizedBox.expand(
-                                        child: _FullScreenImageGallery(
-                                          images: _images,
-                                          initialIndex: idx,
-                                          onDelete: (index) {
-                                            setState(() {
-                                              _images.removeAt(index);
-                                              _selectedImages.removeAt(index);
-                                            });
-                                          },
-                                        ),
-                                      ),
                                     ),
-                                  ),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(16),
-                                    child: Image.file(
-                                      File(img.path),
-                                      width: 80,
-                                      height: 80,
-                                      fit: BoxFit.cover,
-                                    ),
-                                  ),
+                                  ],
                                 ),
-                              );
-                            }),
-                          ),
+                                selected: isSelected,
+                                selectedColor: (mood['color'] as Color).withOpacity(0.15),
+                                backgroundColor: Colors.transparent,
+                                side: BorderSide(
+                                  color: isSelected ? (mood['color'] as Color) : Colors.transparent,
+                                  width: 1.2,
+                                ),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                onSelected: (_) => setState(() => _selectedMood = mood['name'] as String),
+                              ),
+                            );
+                          }).toList(),
                         ),
                       ),
+                      const SizedBox(height: 8),
+                      // 图片/附件区域
+                      if (_images.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 12, bottom: 12),
+                          child: SizedBox(
+                            height: 100,
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                children: List.generate(_images.length, (idx) {
+                                  final img = _images[idx];
+                                  return Padding(
+                                    padding: const EdgeInsets.only(right: 16),
+                                    child: Stack(
+                                      children:
+                                      [
+                                        GestureDetector(
+                                          onTap: () => showDialog(
+                                            context: context,
+                                            barrierDismissible: true,
+                                            builder: (_) => Dialog(
+                                              backgroundColor: Colors.transparent,
+                                              insetPadding: EdgeInsets.zero,
+                                              child: SizedBox.expand(
+                                                child: _FullScreenImageGallery(
+                                                  images: _images,
+                                                  initialIndex: idx,
+                                                  onDelete: (index) {
+                                                    setState(() {
+                                                      _images.removeAt(index);
+                                                    });
+                                                  },
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          child: ClipRRect(
+                                            borderRadius: BorderRadius.circular(18),
+                                            child: Image.file(
+                                              File(img.path),
+                                              width: 90,
+                                              height: 90,
+                                              fit: BoxFit.cover,
+                                            ),
+                                          ),
+                                        ),
+                                        Positioned(
+                                          top: -8,
+                                          right: -8,
+                                          child: PopupMenuButton(
+                                            icon: Container(
+                                              decoration: BoxDecoration(
+                                                color: Colors.white,
+                                                borderRadius: BorderRadius.circular(50),
+                                                boxShadow: [
+                                                  BoxShadow(
+                                                    color: Colors.black12,
+                                                    blurRadius: 2,
+                                                    spreadRadius: 1,
+                                                  )
+                                                ]
+                                              ),
+                                              child: const Icon(Icons.more_vert,
+                                                color: Colors.black54,
+                                                size: 18,
+                                              ),
+                                            ),
+                                            itemBuilder: (context) => [
+                                              PopupMenuItem(
+                                                value: 'delete',
+                                                child: Row(
+                                                  children: const [
+                                                    Icon(Icons.delete, size: 18, color: Colors.black54),
+                                                    SizedBox(width: 8),
+                                                    Text('删除照片', style: TextStyle(color: Colors.black54)),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                            onSelected: (value) {
+                                              if (value == 'delete') {
+                                                setState(() {
+                                                  _images.removeAt(idx);
+                                                });
+                                              }
+                                            },
+                                          ),
+                                        )
+                                      ],
+                                    ),
+                                  );
+                                }),
+                              ),
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 8),
+                        // 正文
+                        Expanded(
+                          child: TextField(
+                            controller: _contentController,
+                            style: const TextStyle(
+                              color: Colors.black87,
+                              fontSize: 17,
+                              height: 1.7,
+                            ),
+                            decoration: const InputDecoration(
+                              border: InputBorder.none,
+                              hintText: '请输入正文...',
+                              hintStyle: TextStyle(color: Color(0xFF9CA3AF), fontSize: 17),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                            keyboardType: TextInputType.multiline,
+                            maxLines: null,
+                            minLines: 10,
+                          ),
+                        ),
+                        const SizedBox(height: 56), // 预留底部按钮空间
+                    ],
+                  ),
+                ),
+                // 左下角字数统计
+                Positioned(
+                  left: 24,
+                  bottom: 24,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF3F4F6),
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black12,
+                          blurRadius: 2,
+                          offset: const Offset(0, 1),
+                        )
+                      ]
                     ),
-                  SizedBox(height: 8),
-                  // 正文
-                  Expanded(
-                    child: TextField(
-                      controller: _contentController,
-                      style: TextStyle(
-                        color: Colors.black87,
-                        fontSize: 17,
-                        height: 1.7,
+                    child: Text(
+                      '字数 $_contentLength',
+                      style: const TextStyle(
+                        color: Color(0xFF4B5563),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
                       ),
-                      decoration: InputDecoration(
-                        border: InputBorder.none,
-                        hintText: '请输入正文...',
-                        hintStyle: TextStyle(color: Colors.black26, fontSize: 17),
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                      keyboardType: TextInputType.multiline,
-                      maxLines: null,
-                      minLines: 10,
                     ),
                   ),
-                  SizedBox(height: 56), // 预留底部按钮空间
-                ],
-              ),
-            ),
-            // 左下角字数统计
-            Positioned(
-              left: 24,
-              bottom: 24,
-              child: Container(
-                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.grey[200],
-                  borderRadius: BorderRadius.circular(12),
                 ),
-                child: Text(
-                  '字数 $_contentLength',
-                  style: TextStyle(
-                    color: Colors.black54,
-                    fontSize: 14,
+                // 右下角悬浮保存按钮
+                Positioned(
+                  right: 24,
+                  bottom: 16,
+                  child: FloatingActionButton(
+                    onPressed: _saveDiary,
+                    backgroundColor: const Color(0xFF6366F1),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    elevation: 6,
+                    highlightElevation: 10,
+                    child: const Icon(Icons.check, color: Colors.white, size: 28),
                   ),
                 ),
-              ),
+              ],
             ),
-            // 右下角悬浮保存按钮
-            Positioned(
-              right: 24,
-              bottom: 16,
-              child: FloatingActionButton(
-                onPressed: _saveDiary,
-                backgroundColor: Colors.deepPurpleAccent,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                child: Icon(Icons.check, color: Colors.white, size: 32),
-              ),
-            ),
-          ],
-        ),
+          ),
       ),
     );
   }
 }
 
-// 新增全屏图片浏览组件，支持下载和长按保存
 class _FullScreenImageGallery extends StatefulWidget {
   final List<XFile> images;
   final int initialIndex;
   final Function(int)? onDelete;
-  const _FullScreenImageGallery({required this.images, required this.initialIndex, this.onDelete});
+
+  const _FullScreenImageGallery({
+    super.key,
+    required this.images,
+    required this.initialIndex,
+    this.onDelete,
+  });
+
   @override
   State<_FullScreenImageGallery> createState() => _FullScreenImageGalleryState();
 }
@@ -499,14 +643,9 @@ class _FullScreenImageGalleryState extends State<_FullScreenImageGallery> {
   }
 
   Future<void> _saveImage() async {
-    final file = File(widget.images[_currentIndex].path);
-    final bytes = await file.readAsBytes();
-    final result = await ImageGallerySaver.saveImage(bytes);
-    if (result['isSuccess'] == true || result['isSuccess'] == 1) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已保存到相册')));
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('保存失败')));
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('图片保存功能暂时不可用')),
+    );
   }
 
   void _onLongPress() async {
@@ -517,13 +656,13 @@ class _FullScreenImageGalleryState extends State<_FullScreenImageGallery> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: Icon(Icons.save_alt),
-              title: Text('保存到相册'),
+              leading: const Icon(Icons.save_alt),
+              title: const Text('保存到相册'),
               onTap: () => Navigator.pop(ctx, 'save'),
             ),
             ListTile(
-              leading: Icon(Icons.cancel),
-              title: Text('取消'),
+              leading: const Icon(Icons.cancel),
+              title: const Text('取消'),
               onTap: () => Navigator.pop(ctx, null),
             ),
           ],
@@ -537,67 +676,76 @@ class _FullScreenImageGalleryState extends State<_FullScreenImageGallery> {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        PhotoViewGallery(
-          pageOptions: widget.images.map((img) => PhotoViewGalleryPageOptions(
-            imageProvider: FileImage(File(img.path)),
-            minScale: PhotoViewComputedScale.contained,
-            maxScale: PhotoViewComputedScale.covered * 3.0,
-            heroAttributes: PhotoViewHeroAttributes(tag: img.path),
-            // onTapUp: (_, __, ___) {},
-          )).toList(),
-          backgroundDecoration: BoxDecoration(color: Colors.black),
-          pageController: _pageController,
-          loadingBuilder: (context, event) => Center(child: CircularProgressIndicator()),
-          onPageChanged: (i) => setState(() => _currentIndex = i),
-        ),
-        // 用手势包裹，支持长按
-        Positioned.fill(
-          child: GestureDetector(
-            onLongPress: _onLongPress,
-            behavior: HitTestBehavior.translucent,
-            child: Container(),
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          PhotoViewGallery.builder(
+            itemCount: widget.images.length,
+            builder: (context, index) {
+              return PhotoViewGalleryPageOptions(
+                imageProvider: FileImage(File(widget.images[index].path)),
+                minScale: PhotoViewComputedScale.contained,
+                maxScale: PhotoViewComputedScale.covered * 3.0,
+                heroAttributes: PhotoViewHeroAttributes(tag: widget.images[index].path),
+              );
+            },
+            backgroundDecoration: const BoxDecoration(color: Colors.transparent),
+            pageController: _pageController,
+            loadingBuilder: (context, event) =>
+                const Center(child: CircularProgressIndicator()),
+            onPageChanged: (i) => setState(() => _currentIndex = i),
           ),
-        ),
-        Positioned(
-          top: 40,
-          right: 20,
-          child: Row(
-            children: [
-              IconButton(
-                icon: Icon(Icons.save_alt, color: Colors.white, size: 28),
-                onPressed: _saveImage,
-                tooltip: '保存到相册',
-              ),
-              SizedBox(width: 8),
-              IconButton(
-                icon: Icon(Icons.close, color: Colors.white, size: 32),
-                onPressed: () => Navigator.of(context).pop(),
-              ),
-            ],
+          Positioned.fill(
+            child: GestureDetector(
+              onLongPress: _onLongPress,
+              behavior: HitTestBehavior.translucent,
+              child: Container(),
+            ),
           ),
-        ),
-        if (widget.images.length > 1)
           Positioned(
-            bottom: 40,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: Container(
-                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.circular(16),
+            top: 40,
+            right: 20,
+            child: Row(
+              children: [
+                if (widget.onDelete != null)
+                  IconButton(
+                    icon: const Icon(Icons.delete, color: Colors.white, size: 28),
+                    onPressed: () {
+                      Navigator.pop(context);
+                      widget.onDelete!(_currentIndex);
+                    },
+                  ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white, size: 32),
+                  onPressed: () => Navigator.of(context).pop(),
                 ),
-                child: Text(
-                  '${_currentIndex + 1} / ${widget.images.length}',
-                  style: TextStyle(color: Colors.white, fontSize: 16),
+              ],
+            ),
+          ),
+          if (widget.images.length > 1)
+            Positioned(
+              bottom: 40,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Text(
+                    '${_currentIndex + 1} / ${widget.images.length}',
+                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                  ),
                 ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }

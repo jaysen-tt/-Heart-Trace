@@ -47,5 +47,15 @@
 	<true/>
 	<key>NSCalendarsUsageDescription</key>
 	<string>需要访问您的日历以显示日程</string>
+	<key>NSCameraUsageDescription</key>
+	<string>需要访问您的相机以拍摄头像照片</string>
+	<key>NSCameraUsageDescription</key>
+  	<string>需要访问相机以拍摄头像照片</string>
+  	<key>NSPhotoLibraryUsageDescription</key>
+  	<string>需要访问相册以选择头像照片</string>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>zh_CN</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>需要访问麦克风以录制音频</string>
 </dict>
 </plist>

@@ -1,8 +1,14 @@
 import 'dart:ui' as ui;
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import '../utils/logger_utils.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'diary_edit_page.dart';
+import 'user_profile_page.dart';
+import '../services/diary_local_storage.dart';
+import 'package:jishiqi/services/diary_entry.dart';
 
 // ========== 主页面结构 ==========
 
@@ -35,11 +41,20 @@ class _MainPageState extends State<MainPage> {
   late DateTime birthday;
   late int targetAge;
   bool _hasTriggeredInit = false; // 标记是否已初始化触发
+  final GlobalKey<_TrailPageContentState> _trailPageKey = GlobalKey<_TrailPageContentState>();
+
+  // 新增：保存生日到本地存储
+  Future<void> _saveBirthdayToStorage(DateTime birthday) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('user_birthday', '${birthday.year}-${birthday.month.toString().padLeft(2, '0')}-${birthday.day.toString().padLeft(2, '0')}');
+  }
+
   void updateCountdown(DateTime newBirthday, int newTargetAge) {
     setState(() {
       birthday = newBirthday;
       targetAge = newTargetAge;
     });
+    _saveBirthdayToStorage(newBirthday); // 新增：同步保存
   }
   @override
   void initState() {
@@ -78,7 +93,7 @@ class _MainPageState extends State<MainPage> {
                     onCountdownChanged: updateCountdown,
                   )
                 : TrailPageContent(
-                    key: ValueKey(1),
+                    key: _trailPageKey,
                     birthday: birthday,
                     targetAge: targetAge,
                   ),
@@ -90,10 +105,20 @@ class _MainPageState extends State<MainPage> {
               right: 0,
               bottom: 64 + 24, // 底部导航栏高度+间距
               child: Center(
-                child: GestureDetector(
-                  onTap: () {
-                    // TODO: 新建日记弹窗或跳转
-                  },
+                              child: GestureDetector(
+                onTap: () async {
+                  final result = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => DiaryEditPage(),
+                    ),
+                  );
+                  // 如果有新日记创建，立即刷新轨迹页
+                  if (result != null && result is DiaryEntry) {
+                    // 直接调用轨迹页的刷新方法
+                    _trailPageKey.currentState?.refreshData();
+                  }
+                },
                   child: Container(
                     width: 64,
                     height: 64,
@@ -109,7 +134,7 @@ class _MainPageState extends State<MainPage> {
                       ],
                     ),
                     child: Center(
-                      child: Icon(Icons.add, color: Colors.black, size: 36),
+                      child: Icon(Icons.add, color: Color(0xFF231815), size: 36),
                     ),
                   ),
                 ),
@@ -157,14 +182,16 @@ class _TodayPageContentState extends State<TodayPageContent> with TickerProvider
   late Animation<double> _dayAnim;
   late Animation<double> _targetAgeAnim;
   late List<AnimationController> _ballEntranceControllers;
-  late List<Animation<double>> _ballEntranceAnims;
   late List<AnimationController> _ballBounceControllers;
-  late List<Animation<double>> _ballBounceAnims;
   late AnimationController _pressController;
-  late Animation<double> _pressAnim;
   late AnimationController _barPressController;
+  late List<Animation<double>> _ballEntranceAnims;
+  late List<Animation<double>> _ballBounceAnims;
+  late Animation<double> _pressAnim;
   late Animation<double> _barHeightAnim;
   int selectedYear = 2025;
+  File? userAvatar;
+  Set<String> _highlightDays = {};
 
   @override
   void initState() {
@@ -177,10 +204,65 @@ class _TodayPageContentState extends State<TodayPageContent> with TickerProvider
         countdown = getCountdown(birthday, targetAge);
       });
     });
+    _loadAvatar();
+    _initAnimations();
+    _loadDiaryHighlightDays();
+  }
+
+  Future<void> _loadDiaryHighlightDays() async {
+    try {
+      final storage = DiaryLocalStorage();
+      final diaries = await storage.fetchDiaries();
+      final Set<String> days = {};
+      for (final d in diaries) {
+        final date = d.date;
+        days.add("${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}");
+      }
+      setState(() {
+        _highlightDays = days;
+      });
+    } catch (e) {
+      print('加载日记高亮日期失败: $e');
+    }
+  }
+
+  // 加载头像
+  Future<void> _loadAvatar() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final avatarPath = prefs.getString('user_avatar_path');
+      if (avatarPath != null && File(avatarPath).existsSync()) {
+        setState(() {
+          userAvatar = File(avatarPath);
+        });
+      }
+    } catch (e) {
+      print('加载头像失败: $e');
+    }
+  }
+
+  // 更新头像
+  void _updateAvatar(String? avatarPath) {
+    if (avatarPath != null && File(avatarPath).existsSync()) {
+      setState(() {
+        userAvatar = File(avatarPath);
+      });
+    }
+  }
+
+  // 初始化动画控制器
+  void _initAnimations() {
     _animController = AnimationController(
       vsync: this,
-      duration: Duration(milliseconds: 1800),
+      duration: const Duration(milliseconds: 1500),
     );
+    _animController.addStatusListener((status) {
+      Logger.debug("Animation status changed: $status");
+    });
+    _animController.addListener(() {
+      Logger.debug("Animation value: ${_animController.value}");
+    });
+    _animController.forward();
     _yearAnim = Tween<double>(begin: -10, end: countdown['years']!.toDouble()).animate(
       CurvedAnimation(parent: _animController, curve: Curves.elasticOut),
     );
@@ -261,7 +343,7 @@ class _TodayPageContentState extends State<TodayPageContent> with TickerProvider
 
   double getMaxNumberWidth() {
     final style = TextStyle(
-      color: Colors.black,
+      color: Color(0xFF231815),
       fontSize: 86.3064,
       fontFamily: 'Alibaba-PuHuiTi-Heavy',
       fontWeight: FontWeight.w400,
@@ -471,7 +553,7 @@ class _TodayPageContentState extends State<TodayPageContent> with TickerProvider
                                               style: TextStyle(
                                                 fontFamily: 'Alibaba-PuHuiTi-Light',
                                                 fontSize: 24,
-                                                color: Color(0xFFDBD8D3),
+                                                color: Color(0xFF231815),
                                                 fontWeight: FontWeight.w300,
                                               ),
                                             ),
@@ -559,229 +641,14 @@ class _TodayPageContentState extends State<TodayPageContent> with TickerProvider
     return null;
   }
 
-  // 显示年份选择器
-  void _showYearPicker() {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('选择年份'),
-          content: SizedBox(
-            width: double.maxFinite,
-            height: 300,
-            child: YearPicker(
-              firstDate: DateTime(2020),
-              lastDate: DateTime(2030),
-              selectedDate: DateTime(selectedYear),
-              onChanged: (DateTime value) {
-                setState(() {
-                  selectedYear = value.year;
-                });
-                Navigator.of(context).pop();
-              },
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              child: const Text('取消'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  void _onNavTap(int idx) {
-    if (idx == 1) {
-      Navigator.of(
-        context,
-      ).pushReplacement(MaterialPageRoute(builder: (_) => TrailPageContent(
-        birthday: birthday,
-        targetAge: targetAge,
-      )));
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    // 进度条和圆形尺寸参数
-    final double barWidth = 28.0;
-    final double circleDiameter = barWidth * 1.3;
-    final double barSpacing = 56.0;
-    final double screenWidth = MediaQuery.of(context).size.width;
-    final double rightPadding = 32.0;
-    final double totalBarWidth = barWidth * 3 + barSpacing * 2;
-    final double leftBase = screenWidth * 0.58;
-    final double barHeight = 180.0;
+    // 倒计时数字尺寸参数
     final double barTop = 120.0;
-    final double topOffset = barTop + 20.0;
-    final double ballBarGap = 24.0;
-    final now = DateTime.now();
-    // 年进度（剩余/总数）
-    double yearPercent = countdown['years']! / targetAge;
-    if (yearPercent < 0) yearPercent = 0;
-    if (yearPercent > 1) yearPercent = 1;
-    // 月进度（剩余/12）
-    double monthPercent = countdown['months']! / 12.0;
-    if (monthPercent < 0) monthPercent = 0;
-    if (monthPercent > 1) monthPercent = 1;
-    // 日进度（剩余/30）
-    double dayPercent = countdown['days']! / 30.0;
-    if (dayPercent < 0) dayPercent = 0;
-    if (dayPercent > 1) dayPercent = 1;
 
     return Stack(
       children: [
-        // 小球入场动画
-        Positioned(
-          left: leftBase + barWidth / 2 - circleDiameter / 2, // 年小球
-          top: topOffset,
-          child: Container(
-            width: circleDiameter,
-            height: circleDiameter,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: Color(0xFFE0DFDC), width: 1.2), // 更淡的灰色
-            ),
-            child: ClipRect(
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                heightFactor: yearPercent,
-                child: Container(
-                  width: circleDiameter,
-                  height: circleDiameter,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: LinearGradient(
-                      begin: Alignment.bottomCenter,
-                      end: Alignment.topCenter,
-                      colors: [Color(0xFFF76E00), Color(0x00FFFFFF)],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-        Positioned(
-          left:
-              leftBase +
-              barSpacing +
-              barWidth / 2 -
-              circleDiameter / 2, // 月小球
-          top: topOffset,
-          child: Container(
-            width: circleDiameter,
-            height: circleDiameter,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: Color(0xFFE0DFDC), width: 1.2),
-            ),
-            child: ClipRect(
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                heightFactor: monthPercent,
-                child: Container(
-                  width: circleDiameter,
-                  height: circleDiameter,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: LinearGradient(
-                      begin: Alignment.bottomCenter,
-                      end: Alignment.topCenter,
-                      colors: [Color(0xFF875EC2), Color(0x00FFFFFF)],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-        Positioned(
-          left:
-              leftBase +
-              barSpacing * 2 +
-              barWidth / 2 -
-              circleDiameter / 2, // 日小球
-          top: topOffset,
-          child: Container(
-            width: circleDiameter,
-            height: circleDiameter,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: Color(0xFFE0DFDC), width: 1.2),
-            ),
-            child: ClipRect(
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                heightFactor: dayPercent,
-                child: Container(
-                  width: circleDiameter,
-                  height: circleDiameter,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: LinearGradient(
-                      begin: Alignment.bottomCenter,
-                      end: Alignment.topCenter,
-                      colors: [Color(0xFFFFBF00), Color(0x00FFFFFF)],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-        // 年进度条bar（橙色渐变）
-        Positioned(
-          left: leftBase,
-          top: topOffset + circleDiameter + ballBarGap - 40 + (1 - yearPercent) * barHeight, // 进度条底部对齐
-          child: Container(
-            width: barWidth,
-            height: barHeight * yearPercent,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.bottomCenter,
-                end: Alignment.topCenter,
-                colors: [Color(0xFFF76E00), Color(0x00DBD8D3)],
-              ),
-            ),
-          ),
-        ),
-        // 月进度条bar（紫色渐变）
-        Positioned(
-          left: leftBase + barSpacing,
-          top: topOffset + circleDiameter + ballBarGap - 40 + (1 - monthPercent) * barHeight,
-          child: Container(
-            width: barWidth,
-            height: barHeight * monthPercent,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.bottomCenter,
-                end: Alignment.topCenter,
-                colors: [Color(0xFF875EC2), Color(0x00DBD8D3)],
-              ),
-            ),
-          ),
-        ),
-        // 日进度条bar（黄色渐变）
-        Positioned(
-          left: leftBase + barSpacing * 2,
-          top: topOffset + circleDiameter + ballBarGap - 40 + (1 - dayPercent) * barHeight,
-          child: Container(
-            width: barWidth,
-            height: barHeight * dayPercent,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.bottomCenter,
-                end: Alignment.topCenter,
-                colors: [Color(0xFFFFBF00), Color(0x00DBD8D3)],
-              ),
-            ),
-          ),
-        ),
+
         // 整体再上移60像素（原-40，现-80）
         Transform.translate(
           offset: Offset(0, -80),
@@ -809,7 +676,7 @@ class _TodayPageContentState extends State<TodayPageContent> with TickerProvider
                               return Text(
                                 _yearAnim.value.toInt().toString().padLeft(2, '0'),
                                 style: TextStyle(
-                                  color: Colors.black,
+                                  color: Color(0xFF231815),
                                   fontSize: 86.3064,
                                   fontFamily: 'Alibaba-PuHuiTi-Heavy',
                                   fontWeight: FontWeight.w400,
@@ -836,10 +703,7 @@ class _TodayPageContentState extends State<TodayPageContent> with TickerProvider
                             animation: _monthAnim,
                             builder: (context, child) {
                               return Text(
-                                _monthAnim.value.toInt().toString().padLeft(
-                                  2,
-                                  '0',
-                                ),
+                                _monthAnim.value.toInt().toString().padLeft(2, '0'),
                                 style: TextStyle(
                                   color: Colors.black,
                                   fontSize: 86.3064,
@@ -869,10 +733,7 @@ class _TodayPageContentState extends State<TodayPageContent> with TickerProvider
                             animation: _dayAnim,
                             builder: (context, child) {
                               return Text(
-                                _dayAnim.value.toInt().toString().padLeft(
-                                  2,
-                                  '0',
-                                ),
+                                _dayAnim.value.toInt().toString().padLeft(2, '0'),
                                 style: TextStyle(
                                   color: Colors.black,
                                   fontSize: 86.3064,
@@ -951,8 +812,7 @@ class _TodayPageContentState extends State<TodayPageContent> with TickerProvider
                     fit: BoxFit.scaleDown,
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      'BEFORE I TURN ' +
-                          _targetAgeAnim.value.toInt().toString(),
+                      'BEFORE I TURN ' + _targetAgeAnim.value.toInt().toString(),
                       maxLines: 1,
                       overflow: TextOverflow.visible,
                       softWrap: false,
@@ -1005,6 +865,46 @@ class _TodayPageContentState extends State<TodayPageContent> with TickerProvider
             ),
           ),
         ),
+        // 用户头像 - 顶对齐倒计时，右对齐日历右边
+        Positioned(
+          right: 20, // 右对齐日历右边
+          top: barTop, // 顶对齐倒计时
+          child: GestureDetector(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => UserProfilePage(
+                    onAvatarChanged: _updateAvatar,
+                  ),
+                ),
+              );
+            },
+            child: Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Color(0xFFF5F5F5),
+                border: Border.all(color: Color(0xFFE0E0E0), width: 2),
+              ),
+              child: ClipOval(
+                child: userAvatar != null
+                    ? Image.file(
+                        userAvatar!,
+                        width: 60,
+                        height: 60,
+                        fit: BoxFit.cover,
+                      )
+                    : Icon(
+                        Icons.person,
+                        size: 30,
+                        color: Color(0xFFB0B0B0),
+                      ),
+              ),
+            ),
+          ),
+        ),
         // 日历区域（底部上方）
         Positioned(
           left: 0,
@@ -1012,7 +912,7 @@ class _TodayPageContentState extends State<TodayPageContent> with TickerProvider
           bottom: 98, // 向下移动10px
           child: SizedBox(
             height: 350, // 容器高度缩小，避免侵占其他空间
-            child: _CalendarSwiper(),
+            child: _CalendarSwiper(highlightDays: _highlightDays),
           ),
         ),
       ],
@@ -1024,60 +924,146 @@ class _TodayPageContentState extends State<TodayPageContent> with TickerProvider
 class TrailPageContent extends StatefulWidget {
   final DateTime birthday;
   final int targetAge;
+  final VoidCallback? onDataChanged;
   const TrailPageContent({
     Key? key,
     required this.birthday,
     required this.targetAge,
+    this.onDataChanged,
   }) : super(key: key);
   @override
   State<TrailPageContent> createState() => _TrailPageContentState();
 }
 
 class _TrailPageContentState extends State<TrailPageContent> {
-  // 示例日记数据
-  List<Map<String, dynamic>> _diaryEntries = [
-    {
-      'id': 1,
-      'title': '攀登一座雪山',
-      'content': '这是2024年7月7日的完整日记内容，记录了攀登雪山的全过程，包括准备、挑战和收获。',
-      'date': DateTime(2024, 7, 7),
-      'mood': 'happy',
-    },
-  ];
+  // 1. _diaryEntries 类型统一
+  List<DiaryEntry> _diaryEntries = [];
   late Map<String, int> countdown;
   final double numberFontSize = 86.0;
   final double barSpacing = 24.0;
   String search = '';
+  bool _isLoading = true;
+  bool _isDeleting = false;
 
   @override
   void initState() {
     super.initState();
     countdown = getCountdown(widget.birthday, widget.targetAge);
+    _loadDiaries();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 每次页面显示时重新加载数据
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadDiaries();
+    });
+  }
+
+  // 2. _loadDiaries 直接赋值 List<DiaryEntry>
+  Widget _buildCountdownNumberOnly(int num, double numSize) {
+    return Text(
+      num.toString().padLeft(2, '0'),
+      style: TextStyle(
+        color: Colors.black,
+        fontSize: numSize,
+        fontFamily: 'Alibaba-PuHuiTi-Heavy',
+        fontWeight: FontWeight.w400,
+      ),
+    );
+  }
+
+  Future<void> _loadDiaries() async {
+    try {
+      final storage = DiaryLocalStorage();
+      // 移除测试数据解析，加载实际存储数据
+      // await storage.testDataParsing();
+      final diaries = await storage.fetchDiaries();
+      setState(() {
+        _diaryEntries = diaries;
+        _isLoading = false;
+      });
+      print('刷新后日记条数: ${_diaryEntries.length}');
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      print('加载日记失败: $e');
+    }
+  }
+
+  // 公开的刷新方法，供外部调用
+  void refreshData() {
+    _loadDiaries();
+  }
+
+  // 安全的日期格式化方法
+  String _formatDateSafely(dynamic dateValue) {
+    try {
+      if (dateValue is DateTime) {
+        return DateFormat('yyyy MM dd').format(dateValue);
+      } else if (dateValue is String) {
+        final date = DateTime.parse(dateValue);
+        return DateFormat('yyyy MM dd').format(date);
+      } else {
+        return '未知日期';
+      }
+    } catch (e) {
+      print('日期格式化失败: $e');
+      return '日期错误';
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final filtered = _diaryEntries.where((d) =>
-      d['title'].toString().contains(search) ||
-      d['content'].toString().contains(search) ||
-      DateFormat('yyyy MM dd').format(d['date']).contains(search)
-    ).toList();
+    final filtered = _diaryEntries.where((d) {
+      // 安全地处理日期格式化
+      String dateStr = '';
+      try {
+        if (d.date is DateTime) {
+          dateStr = DateFormat('yyyy MM dd').format(d.date);
+        } else if (d.date is String) {
+          final date = d.date;
+          dateStr = DateFormat('yyyy MM dd').format(date);
+        } else {
+          dateStr = '';
+        }
+      } catch (e) {
+        print('日期格式化失败: $e');
+        dateStr = '';
+      }
+
+      return d.title.toString().contains(search) ||
+             d.content.toString().contains(search) ||
+             dateStr.contains(search);
+    }).toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SizedBox(height: 98),
+        SizedBox(height: 48), // 倒计时固定位置
         // 悬浮倒计时
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            _buildCountdownNumberOnly(countdown['years']!, numberFontSize),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: _buildCountdownNumberOnly(countdown['years']!, numberFontSize),
+            ),
             SizedBox(width: barSpacing),
-            _buildCountdownNumberOnly(countdown['months']!, numberFontSize),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: _buildCountdownNumberOnly(countdown['months']!, numberFontSize),
+            ),
             SizedBox(width: barSpacing),
-            _buildCountdownNumberOnly(countdown['days']!, numberFontSize),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: _buildCountdownNumberOnly(countdown['days']!, numberFontSize),
+            ),
           ],
         ),
-        SizedBox(height: 40),
+        SizedBox(height: 30), // 保持正常间距
         // 'BEFORE I TURN 80' 英文标题
         Center(
           child: Text(
@@ -1130,118 +1116,157 @@ class _TrailPageContentState extends State<TrailPageContent> {
           ),
         ),
         SizedBox(height: 10),
-        // 日记列表（自动填满剩余空间）
+        // 日记列表容器（预留底部空间给新建按钮）
         Expanded(
-          child: ListView.separated(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            itemCount: filtered.length,
-            separatorBuilder: (context, index) => const SizedBox(height: 12),
-            itemBuilder: (context, index) {
-              final entry = filtered[index];
-              return GestureDetector(
-                onTap: () async {
-                  final result = await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => DiaryEditPage(entry: entry),
-                    ),
-                  );
-                  if (result != null && result is Map<String, dynamic>) {
-                    setState(() {
-                      _diaryEntries[index] = result;
-                    });
-                  }
-                },
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.black,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-                  child: Row(
-                    children: [
-                      Text(
-                        DateFormat('yyyy MM dd').format(entry['date']),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 100), // 预留底部空间给新建按钮
+            decoration: BoxDecoration(
+              color: Colors.transparent,
+            ),
+            child: _isLoading
+                ? Center(child: CircularProgressIndicator())
+                : filtered.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.note_add, size: 64, color: Colors.grey),
+                            SizedBox(height: 16),
+                            Text(
+                              '还没有日记',
+                              style: TextStyle(
+                                color: Colors.grey,
+                                fontSize: 18,
+                              ),
+                            ),
+                            SizedBox(height: 8),
+                            Text(
+                              '点击下方按钮开始记录',
+                              style: TextStyle(
+                                color: Colors.grey[600],
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
                         ),
+                      )
+                    : ListView.separated(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        itemCount: filtered.length,
+                        separatorBuilder: (context, index) => const SizedBox(height: 12),
+                        itemBuilder: (context, index) {
+                          final entry = filtered[index];
+                          return GestureDetector(
+                            onTap: () async {
+                              final result = await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => DiaryEditPage(entry: entry),
+                                ),
+                              );
+                              if (result != null && result is DiaryEntry) {
+                                // 直接刷新数据
+                                _loadDiaries();
+                              }
+                            },
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Color(0xFF231815),
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+                              child: Row(
+                                children: [
+                                  Text(
+                                    _formatDateSafely(entry.date),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Text(
+                                      entry.title,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 16,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  PopupMenuButton<String>(
+                                    icon: Icon(Icons.more_horiz, color: Colors.white),
+                                    onSelected: (value) async {
+                                      if (_isDeleting) return;
+                                      if (value == 'delete') {
+                                        setState(() { _isDeleting = true; });
+                                        final storage = DiaryLocalStorage();
+                                        await storage.deleteDiary(entry.id.toString());
+                                        await _loadDiaries();
+                                        setState(() {
+                                          _isDeleting = false;
+                                          search = '';
+                                        });
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(content: Text('删除成功')),
+                                        );
+                                      } else if (value == 'top') {
+                                        setState(() {
+                                          _diaryEntries.removeWhere((e) => e.id == entry.id);
+                                          _diaryEntries.insert(0, entry);
+                                        });
+                                      } else if (value == 'edit') {
+                                        final result = await Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) => DiaryEditPage(entry: entry),
+                                          ),
+                                        );
+                                        if (result != null) {
+                                          await _loadDiaries();
+                                        }
+                                      } else if (value == 'share') {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(content: Text('分享功能开发中...')),
+                                        );
+                                      }
+                                    },
+                                    enabled: !_isDeleting,
+                                    itemBuilder: (context) => [
+                                      PopupMenuItem(
+                                        value: 'top',
+                                        child: Text('置顶'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'edit',
+                                        child: Text('编辑'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'share',
+                                        child: Text('分享'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'delete',
+                                        child: Text('删除', style: TextStyle(color: Colors.red)),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Text(
-                          entry['title'],
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Icon(Icons.more_horiz, color: Colors.white),
-                    ],
-                  ),
-                ),
-              );
-            },
           ),
-        ),
+        ), // Expanded
         SizedBox(height: 24),
-      ],
-    );
+      ], // Column children
+    ); // Column
   }
 
-  Widget _buildCountdownNumber(int num, String label, double numSize, double labelSize) {
-    return Column(
-      children: [
-        Text(
-          num.toString().padLeft(2, '0'),
-          style: TextStyle(
-            color: Colors.black,
-            fontSize: numSize,
-            fontFamily: 'Alibaba-PuHuiTi-Heavy',
-            fontWeight: FontWeight.w400,
-          ),
-        ),
-        SizedBox(height: 2),
-        SizedBox(height: 6), // 数字和英文间距6px
-        Text(
-          label,
-          style: TextStyle(
-            color: Colors.red, // 标记为红色
-            fontSize: labelSize,
-            fontFamily: 'Alibaba-PuHuiTi-Light',
-            fontWeight: FontWeight.w100,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildCountdownNumberOnly(int num, double numSize) {
-    return Text(
-      num.toString().padLeft(2, '0'),
-      style: TextStyle(
-        color: Colors.black,
-        fontSize: numSize,
-        fontFamily: 'Alibaba-PuHuiTi-Heavy',
-        fontWeight: FontWeight.w400,
-      ),
-    );
-  }
-  Widget _buildCountdownLabelOnly(String label, double labelSize) {
-    return Text(
-      label,
-      style: TextStyle(
-        color: Colors.red, // 标记为红色
-        fontSize: labelSize,
-        fontFamily: 'Alibaba-PuHuiTi-Light',
-        fontWeight: FontWeight.w100,
-      ),
-    );
-  }
 }
 
 // 基础底部导航栏组件
@@ -1321,6 +1346,8 @@ class BottomNavBar extends StatelessWidget {
 
 // 日历滑动组件，保持原UI不变，仅包裹滑动逻辑
 class _CalendarSwiper extends StatefulWidget {
+  final Set<String> highlightDays;
+  const _CalendarSwiper({Key? key, this.highlightDays = const {}});
   @override
   State<_CalendarSwiper> createState() => _CalendarSwiperState();
 }
@@ -1399,7 +1426,7 @@ class _CalendarSwiperState extends State<_CalendarSwiper> {
             itemBuilder: (context, index) {
               int offset = index - 1;
               DateTime showDate = _getMonthDate(offset);
-              return _CalendarStaticView(showDate: showDate);
+              return _CalendarStaticView(showDate: showDate, highlightDays: widget.highlightDays);
             },
           );
         },
@@ -1411,7 +1438,8 @@ class _CalendarSwiperState extends State<_CalendarSwiper> {
 // 保持原日历UI不变，抽出为静态渲染组件
 class _CalendarStaticView extends StatelessWidget {
   final DateTime showDate;
-  const _CalendarStaticView({required this.showDate});
+  final Set<String> highlightDays;
+  const _CalendarStaticView({required this.showDate, this.highlightDays = const {}});
 
   List<int> getMockContentDays(int year, int month) {
     final now = DateTime.now();
@@ -1430,7 +1458,11 @@ class _CalendarStaticView extends StatelessWidget {
     final firstDayOfWeek = DateTime(year, month, 1).weekday % 7;
     final daysInMonth = DateTime(year, month + 1, 0).day;
     final lastMonthDays = DateTime(year, month, 0).day;
-    final contentDays = getMockContentDays(year, month);
+    // 真实高亮日记天数
+    final Set<int> contentDays = {
+      for (int d = 1; d <= daysInMonth; d++)
+        if (highlightDays.contains("${year.toString().padLeft(4, '0')}-${month.toString().padLeft(2, '0')}-${d.toString().padLeft(2, '0')}") ) d
+    };
     return Stack(
       children: [
         Column(
@@ -1438,14 +1470,14 @@ class _CalendarStaticView extends StatelessWidget {
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day) => Expanded(
+              children: ['日', '一', '二', '三', '四', '五', '六'].map((day) => Expanded(
                 child: Text(
                   day,
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w400,
-                    color: ['M','T','W','T','F','S','S'].indexOf(day) == (DateTime.now().weekday % 7)
+                    color: ['日', '一', '二', '三', '四', '五', '六'].indexOf(day) == DateTime.now().weekday % 7
                         ? Color(0xFFF86E00)
                         : Color(0xFFC0BBB7),
                     letterSpacing: 1.5,
@@ -1663,7 +1695,7 @@ Future<DateTime?> showCustomDatePicker({
                                                   ),
                                                   enabledBorder: OutlineInputBorder(
                                                     borderRadius: BorderRadius.circular(8),
-                                                    borderSide: BorderSide(color: Color(0xFFDBD8D3)),
+                                                    borderSide: BorderSide(color: Color(0xFF231815)),
                                                   ),
                                                   focusedBorder: OutlineInputBorder(
                                                     borderRadius: BorderRadius.circular(8),
