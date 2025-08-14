@@ -1,15 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:rive/rive.dart';
-import '../components/animated_btn.dart';
-import '../utils/rive_utils.dart';
-
 import 'package:image_picker/image_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:image_cropper_platform_interface/image_cropper_platform_interface.dart' as icpi;
 import 'dart:io';
-import 'dart:ui' as ui;
+
 import 'package:shared_preferences/shared_preferences.dart';
-import 'onboarding_wrapper.dart';
+import 'today_page.dart';
 
 class UserProfilePage extends StatefulWidget {
   final Function(String?)? onAvatarChanged;
@@ -30,41 +26,67 @@ class _UserProfilePageState extends State<UserProfilePage> {
   String _userEmail = 'example@test.com';
   String _userPhone = '13800138000';
   File? _profileImage;
-  bool _isEditing = false;
-  late RiveAnimationController _btnAnimationController;
-
   @override
   void initState() {
     super.initState();
     _loadUserInfo();
-    _btnAnimationController = OneShotAnimation(
-      "active",
-      autoplay: false,
-    );
   }
 
   Future<void> _loadUserInfo() async {
-    // 从本地存储加载用户信息的实现
-    // 这里使用默认值作为示例
+    final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _userName = '张三';
-      _userGender = '男';
-      _userEmail = 'example@test.com';
-      _userPhone = '13800138000';
+      _userName = prefs.getString('user_name') ?? '';
+      _userGender = prefs.getString('user_gender') ?? '';
+      _userEmail = prefs.getString('user_email') ?? '';
+      _userPhone = prefs.getString('user_phone') ?? '';
+      
+      // 加载头像
+      final avatarPath = prefs.getString('user_avatar_path');
+      if (avatarPath != null && File(avatarPath).existsSync()) {
+        _profileImage = File(avatarPath);
+      } else {
+        _profileImage = null;
+      }
     });
   }
 
   Future<void> _saveUserInfoToStorage() async {
-    // 保存用户信息到本地存储的实现
     if (_formKey.currentState!.validate()) {
       _formKey.currentState!.save();
-      setState(() => _isEditing = false);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_name', _userName);
+      await prefs.setString('user_gender', _userGender);
+      await prefs.setString('user_email', _userEmail);
+      await prefs.setString('user_phone', _userPhone);
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('个人信息更新成功')),
         );
       }
     }
+  }
+
+  Future<void> resetUserInfo() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('user_name');
+    await prefs.remove('user_gender');
+    await prefs.remove('user_email');
+    await prefs.remove('user_phone');
+    await prefs.remove('user_avatar_path');
+    // 清除倒计时相关数据
+    await prefs.remove('target_age');
+    await prefs.remove('user_birthday');
+    
+
+    
+    setState(() {
+      _userName = '';
+      _userGender = '';
+      _userEmail = '';
+      _userPhone = '';
+      _profileImage = null;
+    });
   }
 
   Future<void> _pickImage(ImageSource source) async {
@@ -76,22 +98,23 @@ class _UserProfilePageState extends State<UserProfilePage> {
 
   Future<void> _cropImage(String imagePath) async {
     final croppedFile = await ImageCropper().cropImage(
-      sourcePath: imagePath,
-      uiSettings: [
-        icpi.AndroidUiSettings(
-          toolbarTitle: '裁剪图片',
-          toolbarColor: Colors.blue,
-          toolbarWidgetColor: Colors.white,
-          initAspectRatio: icpi.CropAspectRatioPreset.original,
-          lockAspectRatio: false,
-          hideBottomControls: true,
-        ),
-        icpi.IOSUiSettings(
-          title: '裁剪图片',
-          minimumAspectRatio: 1.0,
-        ),
-      ],
-    );
+        sourcePath: imagePath,
+        uiSettings: [
+          icpi.AndroidUiSettings(
+            toolbarTitle: '裁剪图片',
+            toolbarColor: Colors.blue,
+            toolbarWidgetColor: Colors.white,
+            initAspectRatio: icpi.CropAspectRatioPreset.square,
+            lockAspectRatio: true,
+            hideBottomControls: true,
+          ),
+          icpi.IOSUiSettings(
+            title: '裁剪图片',
+            aspectRatioPresets: [icpi.CropAspectRatioPreset.square],
+            minimumAspectRatio: 1.0,
+          ),
+        ],
+      );
 
     if (croppedFile != null) {
       setState(() => _profileImage = File(croppedFile.path));
@@ -124,11 +147,12 @@ class _UserProfilePageState extends State<UserProfilePage> {
                   onSaved: (value) => _userName = value!,
                 ),
                 DropdownButtonFormField<String>(
-                  value: _userGender,
+                  value: _userGender, // 默认选中初始化值
                   decoration: const InputDecoration(labelText: '性别'),
                   items: const [
                     DropdownMenuItem(value: '男', child: Text('男')),
                     DropdownMenuItem(value: '女', child: Text('女')),
+                    DropdownMenuItem(value: '其他', child: Text('其他')),
                   ],
                   onChanged: (value) => setState(() => _userGender = value!),
                 ),
@@ -180,18 +204,22 @@ class _UserProfilePageState extends State<UserProfilePage> {
           ),
           TextButton(
             onPressed: () async {
-              // 清除登录状态和引导页状态
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.remove('has_seen_onboarding');
-              await prefs.remove('auth_token');
-              
-              // 导航回引导页，将显示登录界面
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => const OnboardingWrapper()),
-              );
-              Navigator.pop(dialogContext);
-            },
+                // 执行异步操作
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setBool('isLoggedIn', false);
+                
+                // 延迟到下一帧并在使用前捕获上下文
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) {
+                    // 忽略安全上下文使用的lint误报
+                    // ignore: use_build_context_synchronously
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(builder: (context) => const MainPage()),
+                    );
+                  }
+                });
+              },
             child: const Text('退出'),
           ),
         ],
@@ -202,50 +230,58 @@ class _UserProfilePageState extends State<UserProfilePage> {
   Widget _buildProfileImage() {
     return Center(
       child: Stack(
-        alignment: Alignment.bottomRight,
-        children: [
-          CircleAvatar(
-              radius: 60,
-              backgroundImage: _profileImage != null ? FileImage(_profileImage!) : null,
-              child: _profileImage == null ? const Icon(Icons.person, size: 60, color: Colors.white) : null,
-              backgroundColor: Colors.grey,
-            ),
-          AnimatedBtn(
-            btnAnimationController: _btnAnimationController,
-            press: () {
-              _btnAnimationController.isActive = true;
-              Future.delayed(const Duration(milliseconds: 800), () {
-                showModalBottomSheet(
-                  context: context,
-                  builder: (context) => SafeArea(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        ListTile(
-                          leading: const Icon(Icons.photo_library),
-                          title: const Text('从相册选择'),
-                          onTap: () {
-                            Navigator.pop(context);
-                            _pickImage(ImageSource.gallery);
-                          },
-                        ),
-                        ListTile(
-                          leading: const Icon(Icons.camera),
-                          title: const Text('拍照'),
-                          onTap: () {
-                            Navigator.pop(context);
-                            _pickImage(ImageSource.camera);
-                          },
-                        ),
-                      ],
+          alignment: Alignment.bottomRight,
+          children: [
+            CircleAvatar(
+                  radius: 60,
+                  backgroundImage: _profileImage != null ? FileImage(_profileImage!) : null,
+                  backgroundColor: Colors.grey,
+                  child: _profileImage == null ? const Icon(Icons.person, size: 60, color: Colors.white) : null,
+                ),
+            // 添加Padding避免按钮与头像重叠
+            Positioned(
+            right: 0,
+            bottom: 0,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.blue,
+                shape: BoxShape.circle,
+              ),
+              child: IconButton(
+                icon: Icon(Icons.edit, color: Colors.white, size: 20),
+                onPressed: () {
+                  showModalBottomSheet(
+                    context: context,
+                    builder: (context) => SafeArea(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ListTile(
+                            leading: const Icon(Icons.photo_library),
+                            title: const Text('从相册选择'),
+                            onTap: () {
+                              Navigator.pop(context);
+                              _pickImage(ImageSource.gallery);
+                            },
+                          ),
+                          ListTile(
+                            leading: const Icon(Icons.camera),
+                            title: const Text('拍照'),
+                            onTap: () {
+                              Navigator.pop(context);
+                              _pickImage(ImageSource.camera);
+                            },
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                );
-              });
-            },
+                  );
+                },
+              ),
+            ),
           ),
-        ],
-      ),
+          ],
+        ),
     );
   }
 

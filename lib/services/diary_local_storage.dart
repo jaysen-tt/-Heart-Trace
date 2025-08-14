@@ -127,7 +127,6 @@ class DiaryLocalStorage implements DiaryRepository {
   Future<void> updateDiary(DiaryEntry diary) async {
     await init();
     final box = Hive.box<Map>(_boxName);
-    // 直接使用DiaryEntry的id和toJson()方法
     await box.put(diary.id, diary.toJson());
   }
 
@@ -139,6 +138,13 @@ class DiaryLocalStorage implements DiaryRepository {
     // 如果ID是整数，确保在Hive支持的范围内
     final safeId = id;
     await box.delete(safeId);
+  }
+
+  /// 清除所有日记
+  Future<void> clearAllDiaries() async {
+    await init();
+    final box = Hive.box<Map>(_boxName);
+    await box.clear();
   }
 
   /// 搜索日记

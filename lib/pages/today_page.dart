@@ -2,7 +2,6 @@ import 'dart:ui' as ui;
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import '../utils/logger_utils.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'diary_edit_page.dart';
@@ -182,12 +181,12 @@ class _TodayPageContentState extends State<TodayPageContent> with TickerProvider
   late Animation<double> _dayAnim;
   late Animation<double> _targetAgeAnim;
   late List<AnimationController> _ballEntranceControllers;
-  late List<AnimationController> _ballBounceControllers;
-  late AnimationController _pressController;
-  late AnimationController _barPressController;
   late List<Animation<double>> _ballEntranceAnims;
+  late List<AnimationController> _ballBounceControllers;
   late List<Animation<double>> _ballBounceAnims;
+  late AnimationController _pressController;
   late Animation<double> _pressAnim;
+  late AnimationController _barPressController;
   late Animation<double> _barHeightAnim;
   int selectedYear = 2025;
   File? userAvatar;
@@ -254,15 +253,8 @@ class _TodayPageContentState extends State<TodayPageContent> with TickerProvider
   void _initAnimations() {
     _animController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1500),
+      duration: Duration(milliseconds: 1800),
     );
-    _animController.addStatusListener((status) {
-      Logger.debug("Animation status changed: $status");
-    });
-    _animController.addListener(() {
-      Logger.debug("Animation value: ${_animController.value}");
-    });
-    _animController.forward();
     _yearAnim = Tween<double>(begin: -10, end: countdown['years']!.toDouble()).animate(
       CurvedAnimation(parent: _animController, curve: Curves.elasticOut),
     );
@@ -641,6 +633,52 @@ class _TodayPageContentState extends State<TodayPageContent> with TickerProvider
     return null;
   }
 
+  // 显示年份选择器
+  void _showYearPicker() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('选择年份'),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 300,
+            child: YearPicker(
+              firstDate: DateTime(2020),
+              lastDate: DateTime(2030),
+              selectedDate: DateTime(selectedYear),
+              onChanged: (DateTime value) {
+                setState(() {
+                  selectedYear = value.year;
+                });
+                Navigator.of(context).pop();
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: const Text('取消'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _onNavTap(int idx) {
+    if (idx == 1) {
+      Navigator.of(
+        context,
+      ).pushReplacement(MaterialPageRoute(builder: (_) => TrailPageContent(
+        birthday: birthday,
+        targetAge: targetAge,
+      )));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // 倒计时数字尺寸参数
@@ -962,18 +1000,6 @@ class _TrailPageContentState extends State<TrailPageContent> {
   }
 
   // 2. _loadDiaries 直接赋值 List<DiaryEntry>
-  Widget _buildCountdownNumberOnly(int num, double numSize) {
-    return Text(
-      num.toString().padLeft(2, '0'),
-      style: TextStyle(
-        color: Colors.black,
-        fontSize: numSize,
-        fontFamily: 'Alibaba-PuHuiTi-Heavy',
-        fontWeight: FontWeight.w400,
-      ),
-    );
-  }
-
   Future<void> _loadDiaries() async {
     try {
       final storage = DiaryLocalStorage();
@@ -1267,6 +1293,55 @@ class _TrailPageContentState extends State<TrailPageContent> {
     ); // Column
   }
 
+  Widget _buildCountdownNumber(int num, String label, double numSize, double labelSize) {
+    return Column(
+      children: [
+        Text(
+          num.toString().padLeft(2, '0'),
+          style: TextStyle(
+            color: Colors.black,
+            fontSize: numSize,
+            fontFamily: 'Alibaba-PuHuiTi-Heavy',
+            fontWeight: FontWeight.w400,
+          ),
+        ),
+        SizedBox(height: 2),
+        SizedBox(height: 6), // 数字和英文间距6px
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.red, // 标记为红色
+            fontSize: labelSize,
+            fontFamily: 'Alibaba-PuHuiTi-Light',
+            fontWeight: FontWeight.w100,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCountdownNumberOnly(int num, double numSize) {
+    return Text(
+      num.toString().padLeft(2, '0'),
+      style: TextStyle(
+        color: Colors.black,
+        fontSize: numSize,
+        fontFamily: 'Alibaba-PuHuiTi-Heavy',
+        fontWeight: FontWeight.w400,
+      ),
+    );
+  }
+  Widget _buildCountdownLabelOnly(String label, double labelSize) {
+    return Text(
+      label,
+      style: TextStyle(
+        color: Colors.red, // 标记为红色
+        fontSize: labelSize,
+        fontFamily: 'Alibaba-PuHuiTi-Light',
+        fontWeight: FontWeight.w100,
+      ),
+    );
+  }
 }
 
 // 基础底部导航栏组件
@@ -1470,14 +1545,14 @@ class _CalendarStaticView extends StatelessWidget {
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: ['日', '一', '二', '三', '四', '五', '六'].map((day) => Expanded(
+              children: ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day) => Expanded(
                 child: Text(
                   day,
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w400,
-                    color: ['日', '一', '二', '三', '四', '五', '六'].indexOf(day) == DateTime.now().weekday % 7
+                    color: ['M','T','W','T','F','S','S'].indexOf(day) == (DateTime.now().weekday % 7)
                         ? Color(0xFFF86E00)
                         : Color(0xFFC0BBB7),
                     letterSpacing: 1.5,

@@ -6,8 +6,6 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'dart:async';
 
-import 'package:record/record.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
@@ -41,35 +39,9 @@ class _DiaryEditPageState extends State<DiaryEditPage> with SingleTickerProvider
   final List<XFile> _images = [];
 
 
-  // 录音文件列表（可扩展）
-  final List<String> _audioPaths = [];
-  final AudioRecorder _recorder = AudioRecorder();
-  bool _isRecording = false;
-  late Timer _recordingTimer;
-  int _recordingSeconds = 0;
-  late AnimationController _animationController;
-  late Animation<double> _scaleAnimation;
-  late Animation<Color?> _colorAnimation;
-
-  void _initAnimations() {
-    _animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 200),
-    );
-
-    _scaleAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
-    );
-
-    _colorAnimation = ColorTween(begin: Colors.blue, end: Colors.red).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
-    );
-  }
-
   @override
   void initState() {
     super.initState();
-    _initAnimations();
     if (widget.entry != null) {
       _titleController.text = widget.entry!.title;
       _contentController.text = widget.entry!.content;
@@ -89,7 +61,6 @@ class _DiaryEditPageState extends State<DiaryEditPage> with SingleTickerProvider
       _selectedDate = widget.entry!.date;
       _images.addAll((widget.entry!.images).map((e) => XFile(e.toString())));
 
-      _audioPaths.addAll((widget.entry!.audios).map((e) => e.toString()));
     }
     _contentLength = _contentController.text.length;
     _contentController.addListener(() {
@@ -117,9 +88,8 @@ class _DiaryEditPageState extends State<DiaryEditPage> with SingleTickerProvider
       mood: _selectedMood ?? 'neutral',
       images: _images.map((e) => e.path).toList(),
 
-      audios: _audioPaths,
-        files: [], // 满足构造函数必填参数要求
-  
+      files: [],
+      audios: [],
     );
     try {
       final storage = DiaryLocalStorage();
@@ -159,109 +129,6 @@ class _DiaryEditPageState extends State<DiaryEditPage> with SingleTickerProvider
     }
   }
 
-  Future<void> _toggleRecord() async {
-    if (_isRecording) {
-      final path = await _recorder.stop();
-      _recordingTimer.cancel();
-      if (!mounted) return;
-      if (path != null) {
-        setState(() {
-          _audioPaths.add(path);
-          _recordingSeconds = 0;
-        });
-      }
-      Navigator.pop(context);
-    } else {
-      // 检查麦克风权限
-      final status = await Permission.microphone.request();
-      if (!status.isGranted) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('需要麦克风权限才能录音')),
-          );
-        }
-        return;
-      }
-
-      final dir = await getTemporaryDirectory();
-      final filePath = '${dir.path}/${DateTime.now().millisecondsSinceEpoch}.m4a';
-      await _recorder.start(const RecordConfig(), path: filePath);
-      if (!mounted) return;
-      setState(() {
-        _isRecording = true;
-        _recordingSeconds = 0;
-      });
-      _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-        if (!mounted) return;
-        setState(() {
-          _recordingSeconds++;
-        });
-      });
-      // 显示录音对话框
-      await showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => _RecordingDialog(
-          onCancel: () async {
-            await _recorder.stop();
-            _recordingTimer.cancel();
-            setState(() {
-              _isRecording = false;
-              _recordingSeconds = 0;
-            });
-            Navigator.pop(context);
-          },
-          seconds: _recordingSeconds,
-        ),
-      );
-    }
-  }
-
-  // 录音对话框组件
-  Widget _RecordingDialog({
-    required VoidCallback onCancel,
-    required int seconds,
-  }) {
-    return WillPopScope(
-      onWillPop: () async => false,
-      child: Center(
-        child: Container(
-          width: 180,
-          height: 180,
-          decoration: BoxDecoration(
-            color: Colors.black54,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.mic,
-                color: Colors.red,
-                size: 60,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                '正在录音... $seconds',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                '松开取消',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 14,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Future<void> _pickImage() async {
     final pickedFile = await ImagePicker().pickImage(source: ImageSource.gallery);
     if (!mounted) return;
@@ -295,7 +162,7 @@ class _DiaryEditPageState extends State<DiaryEditPage> with SingleTickerProvider
             'mood': _selectedMood ?? 'neutral',
             'images': _images.map((e) => e.path).toList(),
     
-            'audios': _audioPaths,
+            
           }),
         ),
         title: GestureDetector(
@@ -332,28 +199,6 @@ class _DiaryEditPageState extends State<DiaryEditPage> with SingleTickerProvider
                         title: const Text('添加照片'),
                         onTap: () => Navigator.pop(ctx, 'add_photo'),
                       ),
-
-                      AnimatedBuilder(
-                animation: _animationController,
-                builder: (context, child) {
-                  return Transform.scale(
-                    scale: _scaleAnimation.value,
-                    child: ListTile(
-                      leading: Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: _colorAnimation.value,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.mic, color: Colors.white),
-                      ),
-                      title: const Text('录音'),
-                      onTap: () => Navigator.pop(ctx, 'record'),
-                    ),
-                  );
-                },
-              ),
                       ListTile(
                         leading: const Icon(Icons.cancel),
                         title: const Text('取消'),
@@ -365,9 +210,7 @@ class _DiaryEditPageState extends State<DiaryEditPage> with SingleTickerProvider
               );
               if (action == 'add_photo') {
                 await _pickImage();
-              } else if (action == 'record') {
-                  await _toggleRecord();
-                }
+              }
             },
           ),
         ],

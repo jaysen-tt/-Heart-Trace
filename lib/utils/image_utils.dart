@@ -86,10 +86,10 @@ class ImageUtils {
     }
   }
 
-  /// 复制图片到App私有目录（diary_images），返回新路径
+  /// 复制图片到App私有目录，返回新路径
   static Future<String> copyToPrivateDir(String originPath) async {
     final dir = await getApplicationDocumentsDirectory();
-    final imagesDir = Directory(p.join(dir.path, 'diary_images'));
+    final imagesDir = Directory(p.join(dir.path, 'app_images'));
     if (!await imagesDir.exists()) {
       await imagesDir.create(recursive: true);
     }
