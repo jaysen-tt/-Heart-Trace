@@ -12,7 +12,7 @@ Heart Trace is more than just a diary; it is your personal emotional companion a
 If you encounter any issues or have suggestions, please contact us via:
 
 - **提交 Issue (Report an Issue):** [New Issue](../../issues)
-- **电子邮件 (Email):** (Please edit this to add your email if you wish / 请在此处填写您的邮箱)
+- **电子邮件 (Email):784304770@qq.com
 
 我们将尽快回复您。
 We will respond as soon as possible.
