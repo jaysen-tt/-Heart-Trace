@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { MoodProvider } from '../context/MoodContext';
 import { SettingsProvider, useSettings } from '../context/SettingsContext';
 import { useFonts, BarlowCondensed_400Regular, BarlowCondensed_500Medium, BarlowCondensed_600SemiBold } from '@expo-google-fonts/barlow-condensed';
@@ -70,12 +71,14 @@ export default function Layout() {
   }, [fontsLoaded]);
 
   return (
-    <SettingsProvider>
-      <MoodProvider>
-        <ErrorBoundary>
-          <RootLayout />
-        </ErrorBoundary>
-      </MoodProvider>
-    </SettingsProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SettingsProvider>
+        <MoodProvider>
+          <ErrorBoundary>
+            <RootLayout />
+          </ErrorBoundary>
+        </MoodProvider>
+      </SettingsProvider>
+    </GestureHandlerRootView>
   );
 }
