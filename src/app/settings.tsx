@@ -320,7 +320,7 @@ export default function SettingsScreen() {
                  <Image source={require('../../assets/icon.png')} style={{ width: 64, height: 64, borderRadius: 16 }} />
              </View>
              <Text style={[styles.appName, { color: colors.text }]}>每日刻度</Text>
-             <Text style={[styles.version, { color: colors.textTertiary }]}>Version 1.0.0</Text>
+             <Text style={[styles.version, { color: colors.textTertiary }]}>Version 1.0.1</Text>
           </View>
           
           <SettingItem 
