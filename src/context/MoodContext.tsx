@@ -2,8 +2,10 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { getLogs, saveLog as saveLogToStorage } from '../utils/storage';
 import { DayLog } from '../types/mood';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { registerForNotificationsAsync, scheduleReminders } from '../utils/notifications';
+import { cancelAllNotifications } from '../utils/notifications';
 import { format } from 'date-fns';
+import { useSettings } from './SettingsContext';
+import { TRANSLATIONS } from '../constants/i18n';
 
 interface MoodContextType {
   moodLogs: Record<string, DayLog>;
@@ -25,6 +27,7 @@ export const useMood = () => useContext(MoodContext);
 
 export const MoodProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [moodLogs, setMoodLogs] = useState<Record<string, DayLog>>({});
+  const { language, isLoaded } = useSettings();
 
   const refreshLogs = useCallback(async () => {
     const logs = await getLogs();
@@ -35,29 +38,16 @@ export const MoodProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshLogs();
   }, [refreshLogs]);
 
-  // Initialize notifications
+  // Initialize notifications - CLEANUP ONLY
   useEffect(() => {
-    const initNotifications = async () => {
-      const hasPermission = await registerForNotificationsAsync();
-      if (hasPermission) {
-        const logs = await getLogs();
-        const todayStr = format(new Date(), 'yyyy-MM-dd');
-        const isLoggedToday = !!logs[todayStr];
-        await scheduleReminders(isLoggedToday);
-      }
-    };
-    initNotifications();
-  }, []);
+    if (!isLoaded) return;
+    // Ensure any existing notifications are cancelled
+    cancelAllNotifications();
+  }, [isLoaded]); 
 
   const saveLog = async (log: DayLog) => {
     const updatedLogs = await saveLogToStorage(log);
     setMoodLogs(updatedLogs);
-
-    // Update notifications if today's log
-    const todayStr = format(new Date(), 'yyyy-MM-dd');
-    if (log.date === todayStr) {
-      await scheduleReminders(true);
-    }
   };
 
   const deleteLog = async (date: string) => {
@@ -66,12 +56,6 @@ export const MoodProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Save the map without the deleted key
     await AsyncStorage.setItem('@mood_logs_v1', JSON.stringify(rest));
     setMoodLogs(rest);
-
-    // Update notifications if today's log
-    const todayStr = format(new Date(), 'yyyy-MM-dd');
-    if (date === todayStr) {
-      await scheduleReminders(false);
-    }
   };
 
   const togglePinLog = async (date: string) => {

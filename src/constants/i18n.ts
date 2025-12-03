@@ -104,6 +104,10 @@ export const TRANSLATIONS = {
     widget_life_progress: 'Life Progress',
     widget_days_left: 'Days Left',
 
+    // Notifications
+    notification_title: 'Daily Journal',
+    notification_body: 'How was your day? Take a moment to record your mood.',
+
     about_section: 'About',
     about_devs: 'Developers',
     about_help: 'Help Center',
@@ -259,6 +263,10 @@ export const TRANSLATIONS = {
     // Widget
     widget_life_progress: '生命进度',
     widget_days_left: '剩余天数',
+
+    // Notifications
+    notification_title: '每日刻度',
+    notification_body: '今天过得怎么样？花点时间记录一下心情吧。',
 
     about_section: '关于',
     about_devs: '开发者',

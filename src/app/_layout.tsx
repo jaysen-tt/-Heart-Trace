@@ -5,6 +5,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { MoodProvider } from '../context/MoodContext';
 import { SettingsProvider, useSettings } from '../context/SettingsContext';
 import { useFonts, BarlowCondensed_400Regular, BarlowCondensed_500Medium, BarlowCondensed_600SemiBold } from '@expo-google-fonts/barlow-condensed';
+import * as SplashScreen from 'expo-splash-screen';
 
 import { useEffect, useState } from 'react';
 import React from 'react';
@@ -12,6 +13,11 @@ import { View, Text, Platform, ToastAndroid } from 'react-native';
 import { AnimatedSplashScreen } from '../components/AnimatedSplashScreen';
 
 import { syncWidgetData } from '../utils/WidgetSync';
+
+// Prevent the native splash screen from auto-hiding
+SplashScreen.preventAutoHideAsync().catch(() => {
+  /* reloading the app might trigger some race conditions, ignore them */
+});
 
 function RootLayout() {
   const { theme, targetDate, birthDate } = useSettings();
@@ -24,6 +30,13 @@ function RootLayout() {
       syncWidgetData(targetDate, birthDate);
     }
   }, [targetDate, birthDate]);
+  
+  useEffect(() => {
+    if (isSplashVisible) {
+       // We're ready to show our own animated splash, so hide the native one
+       SplashScreen.hideAsync();
+    }
+  }, [isSplashVisible]);
 
   return (
     <SafeAreaProvider>

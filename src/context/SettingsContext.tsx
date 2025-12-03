@@ -97,9 +97,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const savedHabits = await AsyncStorage.getItem('@settings_habits');
       const savedJournalPin = await AsyncStorage.getItem('@settings_journal_pin');
       
-      // Force light mode for UI review as requested
-      setThemeState('light'); 
-      // if (savedTheme) setThemeState(savedTheme as ThemeMode);
+      if (savedTheme) setThemeState(savedTheme as ThemeMode);
       
       if (savedLang) setLanguageState(savedLang as Language);
       if (savedName) setNameState(savedName);

@@ -2,21 +2,20 @@
   "expo": {
     "name": "每日刻度",
     "slug": "heart-trace",
-    "version": "2.0.0",
+    "version": "2.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#F2F1E9"
     },
     "newArchEnabled": false,
     
   "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.hearttrace.app",
-      "buildNumber": "4",
+      "buildNumber": "5",
       "infoPlist": {
         "CFBundleDisplayName": "每日刻度",
         "NSPhotoLibraryUsageDescription": "Allow access to your photos to add a daily memory to your mood log.",
@@ -34,7 +33,7 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.hearttrace.app",
-      "versionCode": 201,
+      "versionCode": 202,
       "softwareKeyboardLayoutMode": "pan"
     },
     "web": {

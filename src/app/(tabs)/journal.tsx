@@ -10,8 +10,14 @@ import { JournalCard } from '../../components/JournalCard';
 import { WriteDiaryScreen } from '../../components/WriteDiaryScreen';
 import { PinInputModal } from '../../components/PinInputModal';
 import { DayLog } from '../../types/mood';
+import { MonthArchiveItem } from '../../components/MonthArchiveItem';
+import { format } from 'date-fns';
 
 const { height } = Dimensions.get('window');
+
+type ListItem = 
+  | { type: 'log'; data: DayLog }
+  | { type: 'archive'; month: string; logs: DayLog[] };
 
 export default function JournalScreen() {
   const { moodLogs, saveLog, deleteLog, togglePinLog } = useMood();
@@ -46,13 +52,35 @@ export default function JournalScreen() {
       setShowUnlockModal(false);
   };
 
-  const journalEntries = Object.values(moodLogs)
+  // Process logs into current month and archives
+  const allLogs = Object.values(moodLogs)
     .filter(log => log.note || log.mood) // Only show actual entries
     .sort((a, b) => {
         if (a.isPinned && !b.isPinned) return -1;
         if (!a.isPinned && b.isPinned) return 1;
         return new Date(b.date).getTime() - new Date(a.date).getTime();
     });
+
+  const currentMonthKey = format(new Date(), 'yyyy-MM');
+  const currentMonthLogs: DayLog[] = [];
+  const pastLogsMap: Record<string, DayLog[]> = {};
+
+  allLogs.forEach(log => {
+      const logMonth = log.date.substring(0, 7);
+      if (logMonth === currentMonthKey) {
+          currentMonthLogs.push(log);
+      } else {
+          if (!pastLogsMap[logMonth]) pastLogsMap[logMonth] = [];
+          pastLogsMap[logMonth].push(log);
+      }
+  });
+
+  const pastMonthKeys = Object.keys(pastLogsMap).sort().reverse();
+  
+  const listData: ListItem[] = [
+      ...currentMonthLogs.map(log => ({ type: 'log' as const, data: log })),
+      ...pastMonthKeys.map(month => ({ type: 'archive' as const, month, logs: pastLogsMap[month] }))
+  ];
 
   const handleOpenEditor = (log?: DayLog) => {
       if (log) {
@@ -79,6 +107,29 @@ export default function JournalScreen() {
 
   const handlePin = async (date: string) => {
       await togglePinLog(date);
+  };
+
+  const renderItem = ({ item }: { item: ListItem }) => {
+      if (item.type === 'log') {
+          return (
+              <JournalCard 
+                  log={item.data} 
+                  onPress={() => handleOpenEditor(item.data)}
+                  onDelete={() => handleDelete(item.data.date)}
+                  onPin={() => handlePin(item.data.date)}
+              />
+          );
+      } else {
+          return (
+              <MonthArchiveItem 
+                  month={item.month}
+                  logs={item.logs}
+                  onLogPress={handleOpenEditor}
+                  onLogPin={handlePin}
+                  onLogDelete={handleDelete}
+              />
+          );
+      }
   };
 
   if (isJournalLocked && !isUnlocked) {
@@ -113,17 +164,10 @@ export default function JournalScreen() {
       </View>
 
       <FlatList
-        data={journalEntries}
-        keyExtractor={item => item.date}
+        data={listData}
+        keyExtractor={item => item.type === 'log' ? item.data.date : item.month}
         contentContainerStyle={styles.listContent}
-        renderItem={({ item }) => (
-            <JournalCard 
-                log={item} 
-                onPress={() => handleOpenEditor(item)}
-                onDelete={() => handleDelete(item.date)}
-                onPin={() => handlePin(item.date)}
-            />
-        )}
+        renderItem={renderItem}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="book-outline" size={48} color={colors.textTertiary} />

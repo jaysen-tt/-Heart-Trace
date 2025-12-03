@@ -14,9 +14,9 @@
 		3A945C3A2ED70D320082E483 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3A945C392ED70D320082E483 /* SwiftUI.framework */; };
 		3A945C452ED70D340082E483 /* HeartTraceWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 3A945C362ED70D320082E483 /* HeartTraceWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
-		A594E591F33CB9BF6C40494F /* WidgetHelper.m in Sources */ = {isa = PBXBuildFile; fileRef = C68BCA8261679FA0A58F9874 /* WidgetHelper.m */; };
+		A594E591F33CB9BF6C40494F /* HeartTrace/WidgetHelper.m in Sources */ = {isa = PBXBuildFile; fileRef = C68BCA8261679FA0A58F9874 /* HeartTrace/WidgetHelper.m */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
-		C7CBD2CEAE7352BF8DC6B5D1 /* WidgetHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1D4CB3167FE8F3E7706D5E /* WidgetHelper.swift */; };
+		C7CBD2CEAE7352BF8DC6B5D1 /* HeartTrace/WidgetHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1D4CB3167FE8F3E7706D5E /* HeartTrace/WidgetHelper.swift */; };
 		E4530B3B8ED8353EACD38303 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 81A8147DF75D1B08F45306A1 /* PrivacyInfo.xcprivacy */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 /* End PBXBuildFile section */
@@ -58,9 +58,9 @@
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = HeartTrace/SplashScreen.storyboard; sourceTree = "<group>"; };
 		AC7C57B78ECEBB4F2D6F315F /* libPods-HeartTrace.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-HeartTrace.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
-		C68BCA8261679FA0A58F9874 /* WidgetHelper.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = HeartTrace/WidgetHelper.m; sourceTree = "<group>"; };
+		C68BCA8261679FA0A58F9874 /* HeartTrace/WidgetHelper.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = HeartTrace/WidgetHelper.m; sourceTree = "<group>"; };
 		D8F2DEA14DCF6D432C401E2C /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-HeartTrace/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
-		DE1D4CB3167FE8F3E7706D5E /* WidgetHelper.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HeartTrace/WidgetHelper.swift; sourceTree = "<group>"; };
+		DE1D4CB3167FE8F3E7706D5E /* HeartTrace/WidgetHelper.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HeartTrace/WidgetHelper.swift; sourceTree = "<group>"; };
 		E8307E396F6BA21621DEDA38 /* Pods-HeartTrace.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-HeartTrace.debug.xcconfig"; path = "Target Support Files/Pods-HeartTrace/Pods-HeartTrace.debug.xcconfig"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = HeartTrace/AppDelegate.swift; sourceTree = "<group>"; };
@@ -68,7 +68,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		3A945C462ED70D340082E483 /* Exceptions for "HeartTraceWidget" folder in "HeartTraceWidgetExtension" target */ = {
+		3A945C462ED70D340082E483 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -81,7 +81,7 @@
 		3A945C3B2ED70D320082E483 /* HeartTraceWidget */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				3A945C462ED70D340082E483 /* Exceptions for "HeartTraceWidget" folder in "HeartTraceWidgetExtension" target */,
+				3A945C462ED70D340082E483 /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
 			);
 			explicitFileTypes = {
 			};
@@ -123,8 +123,8 @@
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
 				81A8147DF75D1B08F45306A1 /* PrivacyInfo.xcprivacy */,
-				DE1D4CB3167FE8F3E7706D5E /* WidgetHelper.swift */,
-				C68BCA8261679FA0A58F9874 /* WidgetHelper.m */,
+				DE1D4CB3167FE8F3E7706D5E /* HeartTrace/WidgetHelper.swift */,
+				C68BCA8261679FA0A58F9874 /* HeartTrace/WidgetHelper.m */,
 			);
 			name = HeartTrace;
 			sourceTree = "<group>";
@@ -382,10 +382,8 @@
 			);
 			inputPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-HeartTrace/Pods-HeartTrace-resources.sh",
-				"${PODS_CONFIGURATION_BUILD_DIR}/EXApplication/ExpoApplication_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/EXConstants/EXConstants.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/EXConstants/ExpoConstants_privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/EXNotifications/ExpoNotifications_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/ExpoFileSystem/ExpoFileSystem_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/ExpoSystemUI/ExpoSystemUI_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/RCT-Folly/RCT-Folly_privacy.bundle",
@@ -398,10 +396,8 @@
 			);
 			name = "[CP] Copy Pods Resources";
 			outputPaths = (
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoApplication_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/EXConstants.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoConstants_privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoNotifications_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoFileSystem_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoSystemUI_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/RCT-Folly_privacy.bundle",
@@ -444,8 +440,8 @@
 			files = (
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
 				0535C74FDFEB8232686AC99D /* ExpoModulesProvider.swift in Sources */,
-				C7CBD2CEAE7352BF8DC6B5D1 /* WidgetHelper.swift in Sources */,
-				A594E591F33CB9BF6C40494F /* WidgetHelper.m in Sources */,
+				C7CBD2CEAE7352BF8DC6B5D1 /* HeartTrace/WidgetHelper.swift in Sources */,
+				A594E591F33CB9BF6C40494F /* HeartTrace/WidgetHelper.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -496,7 +492,7 @@
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
 				PRODUCT_BUNDLE_IDENTIFIER = com.hearttrace.app;
-				PRODUCT_NAME = app;
+				PRODUCT_NAME = "app";
 				SWIFT_OBJC_BRIDGING_HEADER = "HeartTrace/HeartTrace-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -529,7 +525,7 @@
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
 				PRODUCT_BUNDLE_IDENTIFIER = com.hearttrace.app;
-				PRODUCT_NAME = app;
+				PRODUCT_NAME = "app";
 				SWIFT_OBJC_BRIDGING_HEADER = "HeartTrace/HeartTrace-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";

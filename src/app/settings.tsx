@@ -418,6 +418,7 @@ export default function SettingsScreen() {
                                     style={{ width: '100%' }}
                                     maximumDate={new Date()}
                                     locale={language === 'zh' ? 'zh-CN' : 'en-US'}
+                                    themeVariant={theme}
                                 />
                                 <TouchableOpacity 
                                     style={{ marginTop: 16, paddingVertical: 12, paddingHorizontal: 32, backgroundColor: colors.todayIndicator, borderRadius: 25, width: '100%', alignItems: 'center' }}
